@@ -226,14 +226,52 @@ fn parse_header_from_reader<R: BufRead>(
 }
 
 fn extract_text(content: Option<MessageContent>) -> Option<String> {
-    match content? {
-        MessageContent::Text(s) => Some(s.trim().to_string()),
+    let raw = match content? {
+        MessageContent::Text(s) => s,
         MessageContent::Blocks(blocks) => blocks
             .into_iter()
             .find(|b| b.kind == "text")
-            .and_then(|b| b.text)
-            .map(|s| s.trim().to_string()),
+            .and_then(|b| b.text)?,
+    };
+    let cleaned = clean_message_text(&raw);
+    if cleaned.is_empty() { None } else { Some(cleaned) }
+}
+
+/// Clean a raw JSONL message string for display and title generation:
+/// 1. Strip XML/HTML-style tags (removes skill command markup like
+///    `<command-message>` and `<command-name>`).
+/// 2. Drop any line whose slash-prefixed form is the very next line —
+///    skill commands produce a bare name followed by `/name`, so we keep
+///    only the slash version to avoid "foo /foo" repetition.
+fn clean_message_text(s: &str) -> String {
+    // Step 1: strip tags, preserving inter-tag text and structure.
+    let mut stripped = String::new();
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => stripped.push(c),
+            _ => {}
+        }
     }
+
+    // Step 2: remove a line when the immediately following line is "/" + that line.
+    let lines: Vec<&str> = stripped.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let mut result = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let next_is_slash_version = lines
+            .get(i + 1)
+            .is_some_and(|next| *next == format!("/{line}"));
+        if !next_is_slash_version {
+            result.push(line);
+        }
+        i += 1;
+    }
+
+    result.join("\n").trim().to_string()
 }
 
 fn last_two(path: &Path) -> String {
@@ -328,5 +366,35 @@ mod tests {
         let line = r#"{"type":"user","message":{"role":"user","content":"  \n  padded  \n  "}}"#;
         let (_, _, msg) = parse(line);
         assert_eq!(msg.as_deref(), Some("padded"));
+    }
+
+    #[test]
+    fn strips_xml_tags_and_deduplicates_command_name() {
+        // Skill messages: <command-message> gives bare name, <command-name> gives /name.
+        // After cleaning, only the slash version should remain.
+        let content = "<command-message>improve-codebase-architecture</command-message>\n\
+                       <command-name>/improve-codebase-architecture</command-name>\n\
+                       Base directory for this skill: /Users/sanjay/.claude/skills/";
+        let line = format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"{content}"}}}}"#,
+            content = content.replace('\n', "\\n").replace('"', "\\\"")
+        );
+        let (_, _, msg) = parse(&line);
+        let msg = msg.unwrap();
+        assert!(!msg.contains('<'), "should have no XML tags: {msg}");
+        assert!(msg.starts_with("/improve-codebase-architecture"), "should start with slash command: {msg}");
+        assert!(!msg.contains("improve-codebase-architecture /improve"), "should not have bare+slash repetition: {msg}");
+        assert!(msg.contains("Base directory"), "should keep non-tag content: {msg}");
+    }
+
+    #[test]
+    fn bare_command_name_without_slash_version_is_kept() {
+        // If there's no following "/foo" line, "foo" is kept as-is.
+        let content = "<command-message>foo</command-message>";
+        let line = format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"{content}"}}}}"#,
+        );
+        let (_, _, msg) = parse(&line);
+        assert_eq!(msg.as_deref(), Some("foo"));
     }
 }
