@@ -1,10 +1,12 @@
 mod app;
 mod data;
 mod fs;
+mod title_service;
 mod titles;
 mod ui;
 
 use app::{Action, App, Response};
+use title_service::{AnthropicTitleService, TitleService};
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
@@ -26,22 +28,9 @@ async fn main() -> anyhow::Result<()> {
 
     let (tx, rx) = mpsc::channel::<(String, String)>();
 
-    for proj in &projects {
-        for sess in &proj.sessions {
-            if sess.needs_title() {
-                let tx = tx.clone();
-                let uuid = sess.uuid.clone();
-                let msg = sess.first_message.clone().unwrap();
-                let cache = sess.title_cache_path();
-                tokio::spawn(async move {
-                    if let Some(title) = titles::generate_title(&msg).await {
-                        let _ = std::fs::write(&cache, &title);
-                        let _ = tx.send((uuid, title));
-                    }
-                });
-            }
-        }
-    }
+    let all_sessions: Vec<&data::Session> =
+        projects.iter().flat_map(|p| p.sessions.iter()).collect();
+    AnthropicTitleService.start(&all_sessions, tx);
 
     let app = App::new(projects);
     let outcome = run_tui(app, rx)?;
