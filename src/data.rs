@@ -58,58 +58,6 @@ pub struct Session {
 }
 
 impl Session {
-    pub fn display_title(&self) -> String {
-        if let Some(t) = &self.title {
-            return t.clone();
-        }
-        if let Some(msg) = &self.first_message {
-            let s: String = msg.chars().take(70).collect();
-            if msg.chars().count() > 70 {
-                return format!("{}…", s);
-            }
-            return s;
-        }
-        format!("[{}]", &self.uuid[..8.min(self.uuid.len())])
-    }
-
-    pub fn age_display(&self) -> String {
-        let secs = SystemTime::now()
-            .duration_since(self.last_modified)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        if secs < 60 {
-            return "just now".into();
-        }
-        let m = secs / 60;
-        if m < 60 {
-            return format!("{m}m ago");
-        }
-        let h = m / 60;
-        if h < 24 {
-            return format!("{h}h ago");
-        }
-        let d = h / 24;
-        if d < 7 {
-            return format!("{d}d ago");
-        }
-        let w = d / 7;
-        if w < 5 {
-            return format!("{w}w ago");
-        }
-        format!("{}mo ago", d / 30)
-    }
-
-    pub fn size_display(&self) -> String {
-        let b = self.size_bytes;
-        if b < 1_024 {
-            format!("{b}B")
-        } else if b < 1_024 * 1_024 {
-            format!("{:.0}KB", b as f64 / 1_024.0)
-        } else {
-            format!("{:.1}MB", b as f64 / (1_024.0 * 1_024.0))
-        }
-    }
-
     pub fn title_cache_path(&self) -> PathBuf {
         self.jsonl_path.with_extension("title")
     }

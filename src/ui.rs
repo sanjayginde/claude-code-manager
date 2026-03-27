@@ -1,8 +1,69 @@
+use std::time::SystemTime;
+
 use crate::app::{App, Pane};
+use crate::data::Session;
 use ratatui::{
     prelude::*,
     widgets::*,
 };
+
+// ── Session display formatting ────────────────────────────────────────────────
+
+pub fn session_title(s: &Session) -> String {
+    if let Some(t) = &s.title {
+        return t.clone();
+    }
+    if let Some(msg) = &s.first_message {
+        let truncated: String = msg.chars().take(70).collect();
+        if msg.chars().count() > 70 {
+            return format!("{}…", truncated);
+        }
+        return truncated;
+    }
+    format!("[{}]", &s.uuid[..8.min(s.uuid.len())])
+}
+
+pub fn session_age(s: &Session) -> String {
+    let secs = SystemTime::now()
+        .duration_since(s.last_modified)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    format_age_secs(secs)
+}
+
+fn format_age_secs(secs: u64) -> String {
+    if secs < 60 {
+        return "just now".into();
+    }
+    let m = secs / 60;
+    if m < 60 {
+        return format!("{m}m ago");
+    }
+    let h = m / 60;
+    if h < 24 {
+        return format!("{h}h ago");
+    }
+    let d = h / 24;
+    if d < 7 {
+        return format!("{d}d ago");
+    }
+    let w = d / 7;
+    if w < 5 {
+        return format!("{w}w ago");
+    }
+    format!("{}mo ago", d / 30)
+}
+
+pub fn session_size(s: &Session) -> String {
+    let b = s.size_bytes;
+    if b < 1_024 {
+        format!("{b}B")
+    } else if b < 1_024 * 1_024 {
+        format!("{:.0}KB", b as f64 / 1_024.0)
+    } else {
+        format!("{:.1}MB", b as f64 / (1_024.0 * 1_024.0))
+    }
+}
 
 pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
@@ -80,13 +141,13 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
         .current_sessions()
         .iter()
         .map(|s| {
-            let title = s.display_title();
+            let title = session_title(s);
             let branch = s.git_branch.as_deref().unwrap_or("?");
             let meta = format!(
                 "   {} · {} · {}",
                 branch,
-                s.age_display(),
-                s.size_display()
+                session_age(s),
+                session_size(s)
             );
             ListItem::new(Text::from(vec![
                 Line::from(Span::raw(format!(" {}", title))),
@@ -179,6 +240,113 @@ fn render_confirm(frame: &mut Frame, area: Rect) {
         ),
         popup,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn make_session(uuid: &str, title: Option<&str>, first_message: Option<&str>, size_bytes: u64) -> Session {
+        Session {
+            uuid: uuid.to_string(),
+            jsonl_path: PathBuf::from("/tmp/test.jsonl"),
+            cwd: PathBuf::from("/tmp"),
+            git_branch: None,
+            first_message: first_message.map(String::from),
+            title: title.map(String::from),
+            last_modified: SystemTime::UNIX_EPOCH,
+            size_bytes,
+        }
+    }
+
+    // ── session_title ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn title_prefers_cached_title() {
+        let s = make_session("abc", Some("My Title"), Some("first msg"), 0);
+        assert_eq!(session_title(&s), "My Title");
+    }
+
+    #[test]
+    fn title_falls_back_to_first_message() {
+        let s = make_session("abc", None, Some("hello world"), 0);
+        assert_eq!(session_title(&s), "hello world");
+    }
+
+    #[test]
+    fn title_truncates_long_first_message() {
+        let long = "a".repeat(80);
+        let s = make_session("abc", None, Some(&long), 0);
+        let result = session_title(&s);
+        assert!(result.ends_with('…'));
+        assert_eq!(result.chars().count(), 71); // 70 chars + ellipsis
+    }
+
+    #[test]
+    fn title_does_not_truncate_exactly_70_chars() {
+        let exact = "a".repeat(70);
+        let s = make_session("abc", None, Some(&exact), 0);
+        assert_eq!(session_title(&s), exact);
+    }
+
+    #[test]
+    fn title_falls_back_to_uuid_prefix() {
+        let s = make_session("abcd1234efgh", None, None, 0);
+        assert_eq!(session_title(&s), "[abcd1234]");
+    }
+
+    // ── session_size ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn size_bytes() {
+        let s = make_session("x", None, None, 512);
+        assert_eq!(session_size(&s), "512B");
+    }
+
+    #[test]
+    fn size_kilobytes() {
+        let s = make_session("x", None, None, 2_048);
+        assert_eq!(session_size(&s), "2KB");
+    }
+
+    #[test]
+    fn size_megabytes() {
+        let s = make_session("x", None, None, 2_097_152);
+        assert_eq!(session_size(&s), "2.0MB");
+    }
+
+    // ── format_age_secs ───────────────────────────────────────────────────────
+
+    #[test]
+    fn age_just_now() {
+        assert_eq!(format_age_secs(30), "just now");
+    }
+
+    #[test]
+    fn age_minutes() {
+        assert_eq!(format_age_secs(5 * 60), "5m ago");
+    }
+
+    #[test]
+    fn age_hours() {
+        assert_eq!(format_age_secs(3 * 3600), "3h ago");
+    }
+
+    #[test]
+    fn age_days() {
+        assert_eq!(format_age_secs(4 * 86400), "4d ago");
+    }
+
+    #[test]
+    fn age_weeks() {
+        assert_eq!(format_age_secs(2 * 7 * 86400), "2w ago");
+    }
+
+    #[test]
+    fn age_months() {
+        assert_eq!(format_age_secs(60 * 86400), "2mo ago");
+    }
 }
 
 fn centered_rect(percent_x: u16, height: u16, r: Rect) -> Rect {
