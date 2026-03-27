@@ -248,7 +248,7 @@ impl<F: Filesystem> App<F> {
         }
 
         // Phase 3: cascade empty-project removal and clamp selection.
-        if self.projects.get(pi).map_or(false, |p| p.sessions.is_empty()) {
+        if self.projects.get(pi).is_some_and(|p| p.sessions.is_empty()) {
             self.projects.remove(pi);
             self.selection.project = if self.projects.is_empty() {
                 0

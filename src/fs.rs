@@ -25,8 +25,10 @@ impl Filesystem for RealFs {
 }
 
 /// No-op filesystem for unit tests — no disk access.
+#[cfg(test)]
 pub struct NullFs;
 
+#[cfg(test)]
 impl Filesystem for NullFs {
     fn remove_file(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
