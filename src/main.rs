@@ -128,6 +128,7 @@ fn tui_loop<B: Backend>(
                 | KeyCode::Char('l') => Action::SwitchPane,
                 KeyCode::Enter => Action::Resume,
                 KeyCode::Char('d') => Action::RequestDelete,
+                KeyCode::Char('y') => Action::CopyMessage,
                 _ => continue,
             }
         };

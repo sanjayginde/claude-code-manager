@@ -16,3 +16,4 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 reqwest = { version = "0.12", features = ["json"] }
 dirs = "5"
 anyhow = "1"
+arboard = "3"

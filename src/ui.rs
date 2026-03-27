@@ -215,7 +215,7 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect) {
         (status, Style::default().fg(Color::Yellow))
     } else {
         (
-            " [↑↓/jk] Navigate  [Tab] Switch pane  [Enter] Resume  [d] Delete  [q] Quit",
+            " [↑↓/jk] Navigate  [Tab] Switch pane  [Enter] Resume  [y] Copy  [d] Delete  [q] Quit",
             Style::default().fg(Color::DarkGray),
         )
     };
