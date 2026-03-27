@@ -1,5 +1,49 @@
+use std::io::BufRead;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
+
+use serde::Deserialize;
+
+// ── Typed schema for Claude's JSONL log format ────────────────────────────────
+
+/// A single line in a Claude session JSONL file.
+/// Unknown fields are ignored; unknown entry types deserialize fine because
+/// all fields except `kind` are optional.
+#[derive(Deserialize)]
+struct LogEntry {
+    #[serde(default)]
+    cwd: Option<String>,
+    #[serde(rename = "gitBranch", default)]
+    git_branch: Option<String>,
+    #[serde(rename = "type")]
+    kind: Option<String>,
+    #[serde(default)]
+    message: Option<LogMessage>,
+}
+
+#[derive(Deserialize)]
+struct LogMessage {
+    #[serde(default)]
+    role: Option<String>,
+    #[serde(default)]
+    content: Option<MessageContent>,
+}
+
+/// Claude content can be a plain string or an array of typed blocks.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum MessageContent {
+    Text(String),
+    Blocks(Vec<ContentBlock>),
+}
+
+#[derive(Deserialize)]
+struct ContentBlock {
+    #[serde(rename = "type")]
+    kind: String,
+    #[serde(default)]
+    text: Option<String>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Session {
@@ -180,14 +224,15 @@ fn load_sessions(dir: &Path) -> anyhow::Result<Vec<Session>> {
     Ok(sessions)
 }
 
-fn parse_header(
-    path: &Path,
-) -> anyhow::Result<(Option<String>, Option<String>, Option<String>)> {
-    use std::io::{BufRead, BufReader};
-
+fn parse_header(path: &Path) -> anyhow::Result<(Option<String>, Option<String>, Option<String>)> {
     let file = std::fs::File::open(path)?;
-    let reader = BufReader::new(file);
+    parse_header_from_reader(std::io::BufReader::new(file))
+}
 
+/// Core parsing logic over any `BufRead` — testable without touching the filesystem.
+fn parse_header_from_reader<R: BufRead>(
+    reader: R,
+) -> anyhow::Result<(Option<String>, Option<String>, Option<String>)> {
     let mut cwd = None;
     let mut branch = None;
     let mut first_msg = None;
@@ -203,32 +248,23 @@ fn parse_header(
             break;
         }
 
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+        let Ok(entry) = serde_json::from_str::<LogEntry>(&line) else {
             continue;
         };
 
         if cwd.is_none() {
-            cwd = v["cwd"].as_str().map(String::from);
+            cwd = entry.cwd;
         }
         if branch.is_none() {
-            branch = v["gitBranch"].as_str().map(String::from);
+            branch = entry.git_branch;
         }
 
         if first_msg.is_none()
-            && v["type"].as_str() == Some("user")
-            && v["message"]["role"].as_str() == Some("user")
+            && entry.kind.as_deref() == Some("user")
         {
-            let content = &v["message"]["content"];
-            if let Some(s) = content.as_str() {
-                first_msg = Some(s.trim().to_string());
-            } else if let Some(arr) = content.as_array() {
-                for item in arr {
-                    if item["type"].as_str() == Some("text") {
-                        if let Some(s) = item["text"].as_str() {
-                            first_msg = Some(s.trim().to_string());
-                            break;
-                        }
-                    }
+            if let Some(msg) = entry.message {
+                if msg.role.as_deref() == Some("user") {
+                    first_msg = extract_text(msg.content);
                 }
             }
         }
@@ -239,6 +275,17 @@ fn parse_header(
     }
 
     Ok((cwd, branch, first_msg))
+}
+
+fn extract_text(content: Option<MessageContent>) -> Option<String> {
+    match content? {
+        MessageContent::Text(s) => Some(s.trim().to_string()),
+        MessageContent::Blocks(blocks) => blocks
+            .into_iter()
+            .find(|b| b.kind == "text")
+            .and_then(|b| b.text)
+            .map(|s| s.trim().to_string()),
+    }
 }
 
 fn last_two(path: &Path) -> String {
@@ -258,4 +305,80 @@ fn decode_label(encoded: &str) -> String {
     let decoded = encoded.replace('-', "/");
     let path = Path::new(&decoded);
     last_two(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn parse(jsonl: &str) -> (Option<String>, Option<String>, Option<String>) {
+        parse_header_from_reader(Cursor::new(jsonl)).unwrap()
+    }
+
+    #[test]
+    fn extracts_cwd_branch_and_string_content() {
+        let line = r#"{"type":"user","cwd":"/home/user/proj","gitBranch":"main","message":{"role":"user","content":"hello world"}}"#;
+        let (cwd, branch, msg) = parse(line);
+        assert_eq!(cwd.as_deref(), Some("/home/user/proj"));
+        assert_eq!(branch.as_deref(), Some("main"));
+        assert_eq!(msg.as_deref(), Some("hello world"));
+    }
+
+    #[test]
+    fn extracts_text_from_content_blocks() {
+        let line = r#"{"type":"user","cwd":"/proj","gitBranch":"feat","message":{"role":"user","content":[{"type":"text","text":"  block message  "},{"type":"image"}]}}"#;
+        let (_, _, msg) = parse(line);
+        assert_eq!(msg.as_deref(), Some("block message"));
+    }
+
+    #[test]
+    fn skips_non_user_entries_for_first_message() {
+        let jsonl = "{ \"type\":\"assistant\",\"cwd\":\"/proj\",\"gitBranch\":\"main\",\"message\":{\"role\":\"assistant\",\"content\":\"response\"}}\n\
+                     {\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"actual first\"}}";
+        let (_, _, msg) = parse(jsonl);
+        assert_eq!(msg.as_deref(), Some("actual first"));
+    }
+
+    #[test]
+    fn cwd_and_branch_picked_up_from_any_line() {
+        let jsonl = "{\"type\":\"system\",\"cwd\":\"/sys\",\"gitBranch\":\"dev\"}\n\
+                     {\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"hi\"}}";
+        let (cwd, branch, msg) = parse(jsonl);
+        assert_eq!(cwd.as_deref(), Some("/sys"));
+        assert_eq!(branch.as_deref(), Some("dev"));
+        assert_eq!(msg.as_deref(), Some("hi"));
+    }
+
+    #[test]
+    fn malformed_lines_are_skipped_gracefully() {
+        let jsonl = "not json at all\n\
+                     {\"type\":\"user\",\"cwd\":\"/ok\",\"gitBranch\":\"main\",\"message\":{\"role\":\"user\",\"content\":\"fine\"}}";
+        let (cwd, _, msg) = parse(jsonl);
+        assert_eq!(cwd.as_deref(), Some("/ok"));
+        assert_eq!(msg.as_deref(), Some("fine"));
+    }
+
+    #[test]
+    fn missing_fields_return_none() {
+        let line = r#"{"type":"user","message":{"role":"user","content":"no cwd or branch"}}"#;
+        let (cwd, branch, msg) = parse(line);
+        assert!(cwd.is_none());
+        assert!(branch.is_none());
+        assert_eq!(msg.as_deref(), Some("no cwd or branch"));
+    }
+
+    #[test]
+    fn content_block_without_text_type_is_ignored() {
+        let line = r#"{"type":"user","message":{"role":"user","content":[{"type":"image","url":"http://x"}]}}"#;
+        let (_, _, msg) = parse(line);
+        assert!(msg.is_none());
+    }
+
+    #[test]
+    fn trims_whitespace_from_message() {
+        let line = r#"{"type":"user","message":{"role":"user","content":"  \n  padded  \n  "}}"#;
+        let (_, _, msg) = parse(line);
+        assert_eq!(msg.as_deref(), Some("padded"));
+    }
 }
