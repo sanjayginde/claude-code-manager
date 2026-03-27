@@ -177,6 +177,7 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
         .highlight_style(
             Style::default()
                 .bg(Color::DarkGray)
+                .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("> ");
