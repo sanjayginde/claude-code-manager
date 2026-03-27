@@ -4,7 +4,7 @@ use ratatui::{
     widgets::*,
 };
 
-pub fn render(frame: &mut Frame, app: &mut App) {
+pub fn render(frame: &mut Frame, app: &App) {
     let area = frame.area();
 
     let chunks = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(area);
@@ -15,18 +15,22 @@ pub fn render(frame: &mut Frame, app: &mut App) {
 
     let right = Layout::vertical([Constraint::Percentage(55), Constraint::Percentage(45)]).split(panes[1]);
 
-    render_projects(frame, app, panes[0]);
-    render_sessions(frame, app, right[0]);
+    // Derive list states once per frame — fresh, never stale.
+    let mut proj_state = app.projects_list_state();
+    let mut sess_state = app.sessions_list_state();
+
+    render_projects(frame, app, panes[0], &mut proj_state);
+    render_sessions(frame, app, right[0], &mut sess_state);
     render_preview(frame, app, right[1]);
     render_status(frame, app, chunks[1]);
 
-    if app.show_delete_confirm {
+    if app.delete_pending() {
         render_confirm(frame, area);
     }
 }
 
-fn render_projects(frame: &mut Frame, app: &mut App, area: Rect) {
-    let active = app.active_pane == Pane::Projects;
+fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui::widgets::ListState) {
+    let active = app.active_pane() == Pane::Projects;
     let border_style = if active {
         Style::default().fg(Color::Cyan)
     } else {
@@ -34,7 +38,7 @@ fn render_projects(frame: &mut Frame, app: &mut App, area: Rect) {
     };
 
     let items: Vec<ListItem> = app
-        .projects
+        .projects()
         .iter()
         .map(|p| {
             let count = p.sessions.len();
@@ -61,24 +65,19 @@ fn render_projects(frame: &mut Frame, app: &mut App, area: Rect) {
         )
         .highlight_symbol("> ");
 
-    frame.render_stateful_widget(list, area, &mut app.projects_state);
+    frame.render_stateful_widget(list, area, state);
 }
 
-fn render_sessions(frame: &mut Frame, app: &mut App, area: Rect) {
-    let active = app.active_pane == Pane::Sessions;
+fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui::widgets::ListState) {
+    let active = app.active_pane() == Pane::Sessions;
     let border_style = if active {
         Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::DarkGray)
     };
 
-    let sessions = app
-        .projects
-        .get(app.selected_project)
-        .map(|p| p.sessions.as_slice())
-        .unwrap_or(&[]);
-
-    let items: Vec<ListItem> = sessions
+    let items: Vec<ListItem> = app
+        .current_sessions()
         .iter()
         .map(|s| {
             let title = s.display_title();
@@ -97,9 +96,8 @@ fn render_sessions(frame: &mut Frame, app: &mut App, area: Rect) {
         .collect();
 
     let title = app
-        .projects
-        .get(app.selected_project)
-        .map(|p| format!(" {} — Sessions ", p.label))
+        .current_project_label()
+        .map(|l| format!(" {} — Sessions ", l))
         .unwrap_or_else(|| " Sessions ".to_string());
 
     let list = List::new(items)
@@ -115,7 +113,7 @@ fn render_sessions(frame: &mut Frame, app: &mut App, area: Rect) {
         )
         .highlight_symbol("> ");
 
-    frame.render_stateful_widget(list, area, &mut app.sessions_state);
+    frame.render_stateful_widget(list, area, state);
 }
 
 fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
@@ -124,7 +122,7 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
         .and_then(|s| s.first_message.as_deref())
         .unwrap_or("");
 
-    let border_style = if app.active_pane == Pane::Sessions {
+    let border_style = if app.active_pane() == Pane::Sessions {
         Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::DarkGray)
@@ -144,8 +142,9 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_status(frame: &mut Frame, app: &App, area: Rect) {
-    let (msg, style): (&str, Style) = if !app.status.is_empty() {
-        (&app.status, Style::default().fg(Color::Yellow))
+    let status = app.status();
+    let (msg, style): (&str, Style) = if !status.is_empty() {
+        (status, Style::default().fg(Color::Yellow))
     } else {
         (
             " [↑↓/jk] Navigate  [Tab] Switch pane  [Enter] Resume  [d] Delete  [q] Quit",
