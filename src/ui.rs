@@ -100,9 +100,9 @@ pub fn render(frame: &mut Frame, app: &App) {
 fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui::widgets::ListState) {
     let active = app.active_pane() == Pane::Projects;
     let border_style = if active {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(Color::Rgb(250, 189, 47))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(Color::Rgb(80, 73, 69))
     };
 
     let items: Vec<ListItem> = app
@@ -114,7 +114,7 @@ fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
                 Span::raw(format!(" {} ", p.label)),
                 Span::styled(
                     format!("[{count}]"),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(Color::Rgb(168, 153, 132)),
                 ),
             ]))
         })
@@ -128,7 +128,8 @@ fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
         )
         .highlight_style(
             Style::default()
-                .bg(Color::DarkGray)
+                .bg(Color::Rgb(80, 73, 69))
+                .fg(Color::Rgb(250, 189, 47))
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("> ");
@@ -139,9 +140,9 @@ fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
 fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui::widgets::ListState) {
     let active = app.active_pane() == Pane::Sessions;
     let border_style = if active {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(Color::Rgb(250, 189, 47))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(Color::Rgb(80, 73, 69))
     };
 
     let items: Vec<ListItem> = app
@@ -158,7 +159,7 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
             );
             ListItem::new(Text::from(vec![
                 Line::from(Span::raw(format!(" {}", title))),
-                Line::from(Span::styled(meta, Style::default().fg(Color::DarkGray))),
+                Line::from(Span::styled(meta, Style::default().fg(Color::Rgb(168, 153, 132)))),
             ]))
         })
         .collect();
@@ -176,8 +177,8 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
         )
         .highlight_style(
             Style::default()
-                .bg(Color::DarkGray)
-                .fg(Color::White)
+                .bg(Color::Rgb(80, 73, 69))
+                .fg(Color::Rgb(250, 189, 47))
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("> ");
@@ -192,9 +193,9 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
         .unwrap_or("");
 
     let border_style = if app.active_pane() == Pane::Sessions {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(Color::Rgb(250, 189, 47))
     } else {
-        Style::default().fg(Color::DarkGray)
+        Style::default().fg(Color::Rgb(80, 73, 69))
     };
 
     frame.render_widget(
