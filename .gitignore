@@ -1,0 +1,16 @@
+# Rust
+/target/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# macOS Spotlight
+.Spotlight-V100
+.Trashes
+
+# macOS Finder
+Icon?
+.claude/settings.local.json
