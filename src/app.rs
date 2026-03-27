@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use arboard::Clipboard;
 use ratatui::widgets::ListState;
 
 use crate::data::{Project, Session};
@@ -29,6 +30,7 @@ pub enum Action {
     CancelDelete,
     Resume,
     Quit,
+    CopyMessage,
     TitleUpdate { uuid: String, title: String },
 }
 
@@ -114,6 +116,18 @@ impl<F: Filesystem> App<F> {
                     }
                 } else {
                     self.active_pane = Pane::Sessions;
+                }
+                Ok(Response::Continue)
+            }
+            Action::CopyMessage => {
+                match self.current_session().and_then(|s| s.first_message.as_deref()) {
+                    Some(msg) => {
+                        match Clipboard::new().and_then(|mut cb| cb.set_text(msg)) {
+                            Ok(()) => self.status = "Message copied.".into(),
+                            Err(e) => self.status = format!("Copy failed: {e}"),
+                        }
+                    }
+                    None => self.status = "Nothing to copy.".into(),
                 }
                 Ok(Response::Continue)
             }
