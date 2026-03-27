@@ -88,7 +88,10 @@ fn tui_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
     rx: &mpsc::Receiver<(String, String)>,
-) -> anyhow::Result<Outcome> {
+) -> anyhow::Result<Outcome>
+where
+    B::Error: Send + Sync + 'static,
+{
     loop {
         while let Ok((uuid, title)) = rx.try_recv() {
             app.dispatch(Action::TitleUpdate { uuid, title })?;
