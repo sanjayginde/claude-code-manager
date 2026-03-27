@@ -233,26 +233,45 @@ fn extract_text(content: Option<MessageContent>) -> Option<String> {
             .find(|b| b.kind == "text")
             .and_then(|b| b.text)?,
     };
-    let cleaned = strip_xml_tags(&raw);
+    let cleaned = clean_message_text(&raw);
     if cleaned.is_empty() { None } else { Some(cleaned) }
 }
 
-/// Strip XML/HTML-style tags from text, preserving non-markup content.
-/// Applied when extracting first messages so that skill command markup
-/// (`<command-message>`, `<command-name>`, etc.) never reaches the UI
-/// or the title-generation API.
-fn strip_xml_tags(s: &str) -> String {
-    let mut result = String::new();
+/// Clean a raw JSONL message string for display and title generation:
+/// 1. Strip XML/HTML-style tags (removes skill command markup like
+///    `<command-message>` and `<command-name>`).
+/// 2. Drop any line whose slash-prefixed form is the very next line —
+///    skill commands produce a bare name followed by `/name`, so we keep
+///    only the slash version to avoid "foo /foo" repetition.
+fn clean_message_text(s: &str) -> String {
+    // Step 1: strip tags, preserving inter-tag text and structure.
+    let mut stripped = String::new();
     let mut in_tag = false;
     for c in s.chars() {
         match c {
             '<' => in_tag = true,
             '>' => in_tag = false,
-            _ if !in_tag => result.push(c),
+            _ if !in_tag => stripped.push(c),
             _ => {}
         }
     }
-    result.trim().to_string()
+
+    // Step 2: remove a line when the immediately following line is "/" + that line.
+    let lines: Vec<&str> = stripped.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let mut result = Vec::with_capacity(lines.len());
+    let mut i = 0;
+    while i < lines.len() {
+        let line = lines[i];
+        let next_is_slash_version = lines
+            .get(i + 1)
+            .is_some_and(|next| *next == format!("/{line}"));
+        if !next_is_slash_version {
+            result.push(line);
+        }
+        i += 1;
+    }
+
+    result.join("\n").trim().to_string()
 }
 
 fn last_two(path: &Path) -> String {
@@ -350,7 +369,9 @@ mod tests {
     }
 
     #[test]
-    fn strips_xml_tags_from_skill_command_messages() {
+    fn strips_xml_tags_and_deduplicates_command_name() {
+        // Skill messages: <command-message> gives bare name, <command-name> gives /name.
+        // After cleaning, only the slash version should remain.
         let content = "<command-message>improve-codebase-architecture</command-message>\n\
                        <command-name>/improve-codebase-architecture</command-name>\n\
                        Base directory for this skill: /Users/sanjay/.claude/skills/";
@@ -361,20 +382,19 @@ mod tests {
         let (_, _, msg) = parse(&line);
         let msg = msg.unwrap();
         assert!(!msg.contains('<'), "should have no XML tags: {msg}");
-        assert!(msg.contains("improve-codebase-architecture"), "should keep tag content: {msg}");
+        assert!(msg.starts_with("/improve-codebase-architecture"), "should start with slash command: {msg}");
+        assert!(!msg.contains("improve-codebase-architecture /improve"), "should not have bare+slash repetition: {msg}");
         assert!(msg.contains("Base directory"), "should keep non-tag content: {msg}");
     }
 
     #[test]
-    fn message_of_only_tags_returns_none() {
+    fn bare_command_name_without_slash_version_is_kept() {
+        // If there's no following "/foo" line, "foo" is kept as-is.
         let content = "<command-message>foo</command-message>";
-        // After stripping tags, only whitespace/text content remains.
-        // "foo" is kept (it's between the tags, not a tag itself).
         let line = format!(
             r#"{{"type":"user","message":{{"role":"user","content":"{content}"}}}}"#,
         );
         let (_, _, msg) = parse(&line);
-        // "foo" remains — strip_xml_tags preserves text between tags
         assert_eq!(msg.as_deref(), Some("foo"));
     }
 }
