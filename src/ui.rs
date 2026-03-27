@@ -14,8 +14,15 @@ pub fn session_title(s: &Session) -> String {
         return t.clone();
     }
     if let Some(msg) = &s.first_message {
-        let truncated: String = msg.chars().take(70).collect();
-        if msg.chars().count() > 70 {
+        // Collapse to a single line — first_message may contain newlines
+        // (e.g. from multi-part skill commands) that don't render well in a list row.
+        let oneline: String = msg.lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .collect::<Vec<_>>()
+            .join(" ");
+        let truncated: String = oneline.chars().take(70).collect();
+        if oneline.chars().count() > 70 {
             return format!("{}…", truncated);
         }
         return truncated;
@@ -294,6 +301,15 @@ mod tests {
     fn title_falls_back_to_uuid_prefix() {
         let s = make_session("abcd1234efgh", None, None, 0);
         assert_eq!(session_title(&s), "[abcd1234]");
+    }
+
+    #[test]
+    fn title_collapses_multiline_first_message_to_single_line() {
+        let multiline = "improve-codebase-architecture\n/improve-codebase-architecture\nBase directory";
+        let s = make_session("abc", None, Some(multiline), 0);
+        let title = session_title(&s);
+        assert!(!title.contains('\n'), "title should not contain newlines: {title:?}");
+        assert!(title.starts_with("improve-codebase-architecture"), "should start with first line: {title:?}");
     }
 
     // ── session_size ──────────────────────────────────────────────────────────

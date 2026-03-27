@@ -226,14 +226,33 @@ fn parse_header_from_reader<R: BufRead>(
 }
 
 fn extract_text(content: Option<MessageContent>) -> Option<String> {
-    match content? {
-        MessageContent::Text(s) => Some(s.trim().to_string()),
+    let raw = match content? {
+        MessageContent::Text(s) => s,
         MessageContent::Blocks(blocks) => blocks
             .into_iter()
             .find(|b| b.kind == "text")
-            .and_then(|b| b.text)
-            .map(|s| s.trim().to_string()),
+            .and_then(|b| b.text)?,
+    };
+    let cleaned = strip_xml_tags(&raw);
+    if cleaned.is_empty() { None } else { Some(cleaned) }
+}
+
+/// Strip XML/HTML-style tags from text, preserving non-markup content.
+/// Applied when extracting first messages so that skill command markup
+/// (`<command-message>`, `<command-name>`, etc.) never reaches the UI
+/// or the title-generation API.
+fn strip_xml_tags(s: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => result.push(c),
+            _ => {}
+        }
     }
+    result.trim().to_string()
 }
 
 fn last_two(path: &Path) -> String {
@@ -328,5 +347,34 @@ mod tests {
         let line = r#"{"type":"user","message":{"role":"user","content":"  \n  padded  \n  "}}"#;
         let (_, _, msg) = parse(line);
         assert_eq!(msg.as_deref(), Some("padded"));
+    }
+
+    #[test]
+    fn strips_xml_tags_from_skill_command_messages() {
+        let content = "<command-message>improve-codebase-architecture</command-message>\n\
+                       <command-name>/improve-codebase-architecture</command-name>\n\
+                       Base directory for this skill: /Users/sanjay/.claude/skills/";
+        let line = format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"{content}"}}}}"#,
+            content = content.replace('\n', "\\n").replace('"', "\\\"")
+        );
+        let (_, _, msg) = parse(&line);
+        let msg = msg.unwrap();
+        assert!(!msg.contains('<'), "should have no XML tags: {msg}");
+        assert!(msg.contains("improve-codebase-architecture"), "should keep tag content: {msg}");
+        assert!(msg.contains("Base directory"), "should keep non-tag content: {msg}");
+    }
+
+    #[test]
+    fn message_of_only_tags_returns_none() {
+        let content = "<command-message>foo</command-message>";
+        // After stripping tags, only whitespace/text content remains.
+        // "foo" is kept (it's between the tags, not a tag itself).
+        let line = format!(
+            r#"{{"type":"user","message":{{"role":"user","content":"{content}"}}}}"#,
+        );
+        let (_, _, msg) = parse(&line);
+        // "foo" remains — strip_xml_tags preserves text between tags
+        assert_eq!(msg.as_deref(), Some("foo"));
     }
 }
