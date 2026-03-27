@@ -209,13 +209,10 @@ fn parse_header_from_reader<R: BufRead>(
 
         if first_msg.is_none()
             && entry.kind.as_deref() == Some("user")
-        {
-            if let Some(msg) = entry.message {
-                if msg.role.as_deref() == Some("user") {
-                    first_msg = extract_text(msg.content);
-                }
+            && let Some(msg) = entry.message
+            && msg.role.as_deref() == Some("user") {
+                first_msg = extract_text(msg.content);
             }
-        }
 
         if cwd.is_some() && branch.is_some() && first_msg.is_some() {
             break;
