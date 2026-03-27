@@ -1,9 +1,10 @@
 mod app;
 mod data;
+mod fs;
 mod titles;
 mod ui;
 
-use app::{App, Pane};
+use app::{Action, App, Response};
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
@@ -101,7 +102,7 @@ fn tui_loop<B: Backend>(
 ) -> anyhow::Result<Outcome> {
     loop {
         while let Ok((uuid, title)) = rx.try_recv() {
-            app.update_title(&uuid, title);
+            app.dispatch(Action::TitleUpdate { uuid, title })?;
         }
 
         terminal.draw(|f| ui::render(f, app))?;
@@ -114,72 +115,38 @@ fn tui_loop<B: Backend>(
             continue;
         };
 
-        // Swallow key-release events (crossterm sometimes emits them)
         if key.kind == event::KeyEventKind::Release {
             continue;
         }
 
-        if app.show_delete_confirm {
+        let action = if app.delete_pending() {
+            // Confirmation overlay: only these keys are meaningful.
             match key.code {
-                KeyCode::Char('y') | KeyCode::Char('Y') => {
-                    app.show_delete_confirm = false;
-                    match app.delete_current() {
-                        Ok(()) => app.status = "Session deleted.".into(),
-                        Err(e) => app.status = format!("Error: {e}"),
-                    }
-                }
-                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
-                    app.show_delete_confirm = false;
-                }
-                _ => {}
+                KeyCode::Char('y') | KeyCode::Char('Y') => Action::ConfirmDelete,
+                KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Action::CancelDelete,
+                _ => continue,
             }
-            continue;
-        }
+        } else {
+            match key.code {
+                KeyCode::Char('q') => Action::Quit,
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::Quit,
+                KeyCode::Up | KeyCode::Char('k') => Action::NavUp,
+                KeyCode::Down | KeyCode::Char('j') => Action::NavDown,
+                KeyCode::Tab
+                | KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::Char('h')
+                | KeyCode::Char('l') => Action::SwitchPane,
+                KeyCode::Enter => Action::Resume,
+                KeyCode::Char('d') => Action::RequestDelete,
+                _ => continue,
+            }
+        };
 
-        match key.code {
-            KeyCode::Char('q') => return Ok(Outcome::Quit),
-            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                return Ok(Outcome::Quit)
-            }
-
-            KeyCode::Up | KeyCode::Char('k') => {
-                app.status.clear();
-                app.nav_up();
-            }
-            KeyCode::Down | KeyCode::Char('j') => {
-                app.status.clear();
-                app.nav_down();
-            }
-
-            KeyCode::Tab
-            | KeyCode::Left
-            | KeyCode::Right
-            | KeyCode::Char('h')
-            | KeyCode::Char('l') => {
-                app.switch_pane();
-            }
-
-            KeyCode::Enter => {
-                if app.active_pane == Pane::Sessions {
-                    if let Some(sess) = app.current_session() {
-                        return Ok(Outcome::Resume {
-                            cwd: sess.cwd.clone(),
-                            uuid: sess.uuid.clone(),
-                        });
-                    }
-                } else {
-                    app.switch_pane();
-                }
-            }
-
-            KeyCode::Char('d') => {
-                if app.active_pane == Pane::Sessions && app.current_session().is_some() {
-                    app.show_delete_confirm = true;
-                    app.status.clear();
-                }
-            }
-
-            _ => {}
+        match app.dispatch(action)? {
+            Response::Continue => {}
+            Response::Quit => return Ok(Outcome::Quit),
+            Response::ResumeSession { cwd, uuid } => return Ok(Outcome::Resume { cwd, uuid }),
         }
     }
 }
