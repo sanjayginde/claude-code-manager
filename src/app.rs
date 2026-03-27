@@ -255,11 +255,10 @@ impl<F: Filesystem> App<F> {
         }
 
         // Phase 2: in-memory Vec mutation (infallible after phase 1 succeeds).
-        if let Some(proj) = self.projects.get_mut(pi) {
-            if si < proj.sessions.len() {
+        if let Some(proj) = self.projects.get_mut(pi)
+            && si < proj.sessions.len() {
                 proj.sessions.remove(si);
             }
-        }
 
         // Phase 3: cascade empty-project removal and clamp selection.
         if self.projects.get(pi).is_some_and(|p| p.sessions.is_empty()) {
