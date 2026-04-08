@@ -4,7 +4,7 @@ use arboard::Clipboard;
 use ratatui::widgets::ListState;
 
 use crate::data::{Project, Session};
-use crate::fs::{Filesystem, RealFs};
+use crate::session_store::DynStore;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Pane {
@@ -50,24 +50,18 @@ struct Selection {
     session: usize,
 }
 
-pub struct App<F: Filesystem = RealFs> {
+pub struct App {
     projects: Vec<Project>,
     selection: Selection,
     active_pane: Pane,
     delete_pending: bool,
     editing_title: Option<String>,
     status: String,
-    fs: F,
+    store: DynStore,
 }
 
-impl App<RealFs> {
-    pub fn new(projects: Vec<Project>) -> Self {
-        Self::with_fs(projects, RealFs)
-    }
-}
-
-impl<F: Filesystem> App<F> {
-    pub fn with_fs(projects: Vec<Project>, fs: F) -> Self {
+impl App {
+    pub fn new(projects: Vec<Project>, store: DynStore) -> Self {
         Self {
             projects,
             selection: Selection { project: 0, session: 0 },
@@ -75,7 +69,7 @@ impl<F: Filesystem> App<F> {
             delete_pending: false,
             editing_title: None,
             status: String::new(),
-            fs,
+            store,
         }
     }
 
@@ -189,7 +183,7 @@ impl<F: Filesystem> App<F> {
                         let pi = self.selection.project;
                         let si = self.selection.session;
                         if let Some(sess) = self.projects.get_mut(pi).and_then(|p| p.sessions.get_mut(si)) {
-                            self.fs.write_file(&sess.title_cache_path(), &trimmed)?;
+                            self.store.save_title(sess, &trimmed)?;
                             sess.title = Some(trimmed);
                             self.status = "Title updated.".into();
                         }
@@ -294,25 +288,13 @@ impl<F: Filesystem> App<F> {
         let pi = self.selection.project;
         let si = self.selection.session;
 
-        // Phase 1: filesystem first — any error here is a clean abort;
-        // in-memory state is not touched until this succeeds.
+        // Disk first — any error here is a clean abort; in-memory state is
+        // not touched until this succeeds.
         if let Some(sess) = self.projects.get(pi).and_then(|p| p.sessions.get(si)) {
-            if self.fs.exists(&sess.jsonl_path) {
-                self.fs.remove_file(&sess.jsonl_path)?;
-            }
-            if let Some(parent) = sess.jsonl_path.parent() {
-                let uuid_dir = parent.join(&sess.uuid);
-                if self.fs.is_dir(&uuid_dir) {
-                    self.fs.remove_dir_all(&uuid_dir)?;
-                }
-            }
-            let title_cache = sess.title_cache_path();
-            if self.fs.exists(&title_cache) {
-                let _ = self.fs.remove_file(&title_cache);
-            }
+            self.store.delete(sess)?;
         }
 
-        // Phase 2: in-memory Vec mutation (infallible after phase 1 succeeds).
+        // In-memory Vec mutation (infallible after disk op succeeds).
         if let Some(proj) = self.projects.get_mut(pi)
             && si < proj.sessions.len() {
                 proj.sessions.remove(si);
@@ -341,11 +323,12 @@ impl<F: Filesystem> App<F> {
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::Arc;
     use std::time::SystemTime;
 
     use super::*;
     use crate::data::Session;
-    use crate::fs::NullFs;
+    use crate::session_store::NullSessionStore;
 
     fn make_session(uuid: &str) -> Session {
         Session {
@@ -360,7 +343,7 @@ mod tests {
         }
     }
 
-    fn make_app(project_session_counts: &[usize]) -> App<NullFs> {
+    fn make_app(project_session_counts: &[usize]) -> App {
         let projects = project_session_counts
             .iter()
             .enumerate()
@@ -369,7 +352,7 @@ mod tests {
                 sessions: (0..n).map(|si| make_session(&format!("p{pi}s{si}"))).collect(),
             })
             .collect();
-        App::with_fs(projects, NullFs)
+        App::new(projects, Arc::new(NullSessionStore))
     }
 
     #[test]
