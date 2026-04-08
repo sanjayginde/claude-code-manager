@@ -145,11 +145,23 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
         Style::default().fg(Color::Rgb(80, 73, 69))
     };
 
+    let selected_idx = app.sessions_list_state().selected();
+    let editing_buf = app.editing_title();
+
     let items: Vec<ListItem> = app
         .current_sessions()
         .iter()
-        .map(|s| {
-            let title = session_title(s);
+        .enumerate()
+        .map(|(i, s)| {
+            let title_line = if let Some(buf) = editing_buf && selected_idx == Some(i) {
+                Line::from(vec![
+                    Span::raw(" "),
+                    Span::styled(buf, Style::default().fg(Color::Rgb(250, 189, 47))),
+                    Span::styled("█", Style::default().fg(Color::Rgb(250, 189, 47))),
+                ])
+            } else {
+                Line::from(Span::raw(format!(" {}", session_title(s))))
+            };
             let branch = s.git_branch.as_deref().unwrap_or("?");
             let meta = format!(
                 "   {} · {} · {}",
@@ -158,7 +170,7 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
                 session_size(s)
             );
             ListItem::new(Text::from(vec![
-                Line::from(Span::raw(format!(" {}", title))),
+                title_line,
                 Line::from(Span::styled(meta, Style::default().fg(Color::Rgb(168, 153, 132)))),
             ]))
         })
@@ -213,11 +225,16 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_status(frame: &mut Frame, app: &App, area: Rect) {
     let status = app.status();
-    let (msg, style): (&str, Style) = if !status.is_empty() {
+    let (msg, style): (&str, Style) = if app.editing_title().is_some() {
+        (
+            " [Enter] Confirm title  [Esc] Cancel",
+            Style::default().fg(Color::Rgb(250, 189, 47)),
+        )
+    } else if !status.is_empty() {
         (status, Style::default().fg(Color::Yellow))
     } else {
         (
-            " [↑↓/jk] Navigate  [Tab] Switch pane  [Enter] Resume  [y] Copy  [d] Delete  [q] Quit",
+            " [↑↓/jk] Navigate  [Tab] Switch pane  [Enter] Resume  [e] Edit title  [y] Copy  [d] Delete  [q] Quit",
             Style::default().fg(Color::DarkGray),
         )
     };

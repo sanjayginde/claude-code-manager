@@ -32,6 +32,11 @@ pub enum Action {
     Quit,
     CopyMessage,
     TitleUpdate { uuid: String, title: String },
+    StartEditTitle,
+    EditTitleChar(char),
+    EditTitleBackspace,
+    ConfirmEditTitle,
+    CancelEditTitle,
 }
 
 pub enum Response {
@@ -50,6 +55,7 @@ pub struct App<F: Filesystem = RealFs> {
     selection: Selection,
     active_pane: Pane,
     delete_pending: bool,
+    editing_title: Option<String>,
     status: String,
     fs: F,
 }
@@ -67,6 +73,7 @@ impl<F: Filesystem> App<F> {
             selection: Selection { project: 0, session: 0 },
             active_pane: Pane::Projects,
             delete_pending: false,
+            editing_title: None,
             status: String::new(),
             fs,
         }
@@ -133,11 +140,58 @@ impl<F: Filesystem> App<F> {
             }
             Action::Quit => Ok(Response::Quit),
             Action::TitleUpdate { uuid, title } => {
-                for p in &mut self.projects {
-                    for s in &mut p.sessions {
-                        if s.uuid == uuid {
-                            s.title = Some(title);
-                            return Ok(Response::Continue);
+                // Don't overwrite the title of the session currently being edited —
+                // the user's in-flight buffer is the authoritative state right now.
+                let being_edited = self.editing_title.is_some()
+                    && self.current_session().is_some_and(|s| s.uuid == uuid);
+                if !being_edited {
+                    for p in &mut self.projects {
+                        for s in &mut p.sessions {
+                            if s.uuid == uuid {
+                                s.title = Some(title);
+                                return Ok(Response::Continue);
+                            }
+                        }
+                    }
+                }
+                Ok(Response::Continue)
+            }
+            Action::StartEditTitle => {
+                if self.active_pane == Pane::Sessions && self.current_session().is_some() {
+                    let prefill = self
+                        .current_session()
+                        .and_then(|s| s.title.clone())
+                        .unwrap_or_default();
+                    self.editing_title = Some(prefill);
+                }
+                Ok(Response::Continue)
+            }
+            Action::EditTitleChar(c) => {
+                if let Some(buf) = &mut self.editing_title {
+                    buf.push(c);
+                }
+                Ok(Response::Continue)
+            }
+            Action::EditTitleBackspace => {
+                if let Some(buf) = &mut self.editing_title {
+                    buf.pop();
+                }
+                Ok(Response::Continue)
+            }
+            Action::CancelEditTitle => {
+                self.editing_title = None;
+                Ok(Response::Continue)
+            }
+            Action::ConfirmEditTitle => {
+                if let Some(buf) = self.editing_title.take() {
+                    let trimmed = buf.trim().to_string();
+                    if !trimmed.is_empty() {
+                        let pi = self.selection.project;
+                        let si = self.selection.session;
+                        if let Some(sess) = self.projects.get_mut(pi).and_then(|p| p.sessions.get_mut(si)) {
+                            self.fs.write_file(&sess.title_cache_path(), &trimmed)?;
+                            sess.title = Some(trimmed);
+                            self.status = "Title updated.".into();
                         }
                     }
                 }
@@ -173,6 +227,10 @@ impl<F: Filesystem> App<F> {
 
     pub fn status(&self) -> &str {
         &self.status
+    }
+
+    pub fn editing_title(&self) -> Option<&str> {
+        self.editing_title.as_deref()
     }
 
     pub fn current_project_label(&self) -> Option<&str> {
@@ -386,5 +444,104 @@ mod tests {
         assert_eq!(app.projects_list_state().selected(), Some(1));
         assert_eq!(app.sessions_list_state().selected(), Some(0)); // reset on project change
         assert_eq!(app.current_sessions().len(), 2);
+    }
+
+    #[test]
+    fn start_edit_title_prefills_existing_title() {
+        let mut app = make_app(&[2]);
+        app.projects[0].sessions[0].title = Some("Existing Title".into());
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        assert_eq!(app.editing_title(), Some("Existing Title"));
+    }
+
+    #[test]
+    fn start_edit_title_empty_when_no_title() {
+        let mut app = make_app(&[2]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        assert_eq!(app.editing_title(), Some(""));
+    }
+
+    #[test]
+    fn start_edit_title_noop_in_projects_pane() {
+        let mut app = make_app(&[2]);
+        // active_pane starts as Projects
+        app.dispatch(Action::StartEditTitle).unwrap();
+        assert_eq!(app.editing_title(), None);
+    }
+
+    #[test]
+    fn cancel_edit_title_clears_buffer() {
+        let mut app = make_app(&[2]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar('H')).unwrap();
+        app.dispatch(Action::CancelEditTitle).unwrap();
+        assert_eq!(app.editing_title(), None);
+        assert_eq!(app.current_session().unwrap().title, None); // title unchanged
+    }
+
+    #[test]
+    fn confirm_edit_title_updates_session_and_clears_buffer() {
+        let mut app = make_app(&[2]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        for c in "New Title".chars() {
+            app.dispatch(Action::EditTitleChar(c)).unwrap();
+        }
+        app.dispatch(Action::ConfirmEditTitle).unwrap();
+        assert_eq!(app.editing_title(), None);
+        assert_eq!(app.current_session().unwrap().title.as_deref(), Some("New Title"));
+    }
+
+    #[test]
+    fn confirm_edit_title_ignores_whitespace_only_input() {
+        let mut app = make_app(&[2]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar(' ')).unwrap();
+        app.dispatch(Action::ConfirmEditTitle).unwrap();
+        assert_eq!(app.editing_title(), None);
+        assert_eq!(app.current_session().unwrap().title, None); // not updated
+    }
+
+    #[test]
+    fn edit_title_backspace_removes_last_char() {
+        let mut app = make_app(&[1]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar('H')).unwrap();
+        app.dispatch(Action::EditTitleChar('i')).unwrap();
+        app.dispatch(Action::EditTitleBackspace).unwrap();
+        assert_eq!(app.editing_title(), Some("H"));
+    }
+
+    #[test]
+    fn title_update_does_not_clobber_session_being_edited() {
+        let mut app = make_app(&[2]);
+        let uuid = app.projects[0].sessions[0].uuid.clone();
+        app.dispatch(Action::SwitchPane).unwrap();
+        // Start editing the first session
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar('M')).unwrap();
+        // Async title arrives for the same session while editing
+        app.dispatch(Action::TitleUpdate { uuid: uuid.clone(), title: "Async Title".into() }).unwrap();
+        // Edit buffer is intact, session.title was NOT overwritten
+        assert_eq!(app.editing_title(), Some("M"));
+        assert_eq!(app.current_session().unwrap().title, None);
+    }
+
+    #[test]
+    fn title_update_applies_normally_for_other_sessions() {
+        let mut app = make_app(&[2]);
+        let other_uuid = app.projects[0].sessions[1].uuid.clone();
+        app.dispatch(Action::SwitchPane).unwrap();
+        // Start editing session 0
+        app.dispatch(Action::StartEditTitle).unwrap();
+        // Title arrives for session 1 (not being edited)
+        app.dispatch(Action::TitleUpdate { uuid: other_uuid.clone(), title: "Other Title".into() }).unwrap();
+        // Session 1 title was updated normally
+        assert_eq!(app.projects[0].sessions[1].title.as_deref(), Some("Other Title"));
     }
 }
