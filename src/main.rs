@@ -1,11 +1,14 @@
 mod app;
 mod data;
-mod fs;
+mod session_store;
 mod title_service;
 mod titles;
 mod ui;
 
+use std::sync::Arc;
+
 use app::{Action, App, Response};
+use session_store::FsSessionStore;
 use title_service::{AnthropicTitleService, TitleService};
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
@@ -24,15 +27,16 @@ enum Outcome {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let projects = data::load_projects()?;
+    let store: session_store::DynStore = Arc::new(FsSessionStore::new()?);
+    let projects = store.load()?;
 
     let (tx, rx) = mpsc::channel::<(String, String)>();
 
     let all_sessions: Vec<&data::Session> =
         projects.iter().flat_map(|p| p.sessions.iter()).collect();
-    AnthropicTitleService.start(&all_sessions, tx);
+    AnthropicTitleService { store: Arc::clone(&store) }.start(&all_sessions, tx);
 
-    let app = App::new(projects);
+    let app = App::new(projects, store);
     let outcome = run_tui(app, rx)?;
 
     if let Outcome::Resume { cwd, uuid } = outcome {

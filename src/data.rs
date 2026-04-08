@@ -73,18 +73,17 @@ pub struct Project {
     pub sessions: Vec<Session>,
 }
 
-pub fn load_projects() -> anyhow::Result<Vec<Project>> {
-    let base = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("no home dir"))?
-        .join(".claude/projects");
-
+/// Load all projects from `base` (typically `~/.claude/projects`).
+/// Called by `FsSessionStore::load`; the path is resolved there so this
+/// function stays pure and testable without touching the home directory.
+pub(crate) fn load_projects_from(base: &Path) -> anyhow::Result<Vec<Project>> {
     if !base.exists() {
         return Ok(vec![]);
     }
 
     let mut projects = Vec::new();
 
-    for entry in std::fs::read_dir(&base)? {
+    for entry in std::fs::read_dir(base)? {
         let entry = entry?;
         let dir = entry.path();
         if !dir.is_dir() {
