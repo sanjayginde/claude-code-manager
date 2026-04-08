@@ -5,6 +5,7 @@ pub trait Filesystem: Send + 'static {
     fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
     fn exists(&self, path: &Path) -> bool;
     fn is_dir(&self, path: &Path) -> bool;
+    fn write_file(&self, path: &Path, content: &str) -> std::io::Result<()>;
 }
 
 pub struct RealFs;
@@ -21,6 +22,9 @@ impl Filesystem for RealFs {
     }
     fn is_dir(&self, path: &Path) -> bool {
         path.is_dir()
+    }
+    fn write_file(&self, path: &Path, content: &str) -> std::io::Result<()> {
+        std::fs::write(path, content)
     }
 }
 
@@ -41,5 +45,8 @@ impl Filesystem for NullFs {
     }
     fn is_dir(&self, _path: &Path) -> bool {
         true
+    }
+    fn write_file(&self, _path: &Path, _content: &str) -> std::io::Result<()> {
+        Ok(())
     }
 }

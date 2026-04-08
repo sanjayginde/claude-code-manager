@@ -32,6 +32,11 @@ pub enum Action {
     Quit,
     CopyMessage,
     TitleUpdate { uuid: String, title: String },
+    StartEditTitle,
+    EditTitleChar(char),
+    EditTitleBackspace,
+    ConfirmEditTitle,
+    CancelEditTitle,
 }
 
 pub enum Response {
@@ -50,6 +55,7 @@ pub struct App<F: Filesystem = RealFs> {
     selection: Selection,
     active_pane: Pane,
     delete_pending: bool,
+    editing_title: Option<String>,
     status: String,
     fs: F,
 }
@@ -67,6 +73,7 @@ impl<F: Filesystem> App<F> {
             selection: Selection { project: 0, session: 0 },
             active_pane: Pane::Projects,
             delete_pending: false,
+            editing_title: None,
             status: String::new(),
             fs,
         }
@@ -143,6 +150,47 @@ impl<F: Filesystem> App<F> {
                 }
                 Ok(Response::Continue)
             }
+            Action::StartEditTitle => {
+                if self.active_pane == Pane::Sessions && self.current_session().is_some() {
+                    let prefill = self
+                        .current_session()
+                        .and_then(|s| s.title.clone())
+                        .unwrap_or_default();
+                    self.editing_title = Some(prefill);
+                }
+                Ok(Response::Continue)
+            }
+            Action::EditTitleChar(c) => {
+                if let Some(buf) = &mut self.editing_title {
+                    buf.push(c);
+                }
+                Ok(Response::Continue)
+            }
+            Action::EditTitleBackspace => {
+                if let Some(buf) = &mut self.editing_title {
+                    buf.pop();
+                }
+                Ok(Response::Continue)
+            }
+            Action::CancelEditTitle => {
+                self.editing_title = None;
+                Ok(Response::Continue)
+            }
+            Action::ConfirmEditTitle => {
+                if let Some(buf) = self.editing_title.take() {
+                    let trimmed = buf.trim().to_string();
+                    if !trimmed.is_empty() {
+                        let pi = self.selection.project;
+                        let si = self.selection.session;
+                        if let Some(sess) = self.projects.get_mut(pi).and_then(|p| p.sessions.get_mut(si)) {
+                            self.fs.write_file(&sess.title_cache_path(), &trimmed)?;
+                            sess.title = Some(trimmed);
+                            self.status = "Title updated.".into();
+                        }
+                    }
+                }
+                Ok(Response::Continue)
+            }
         }
     }
 
@@ -173,6 +221,10 @@ impl<F: Filesystem> App<F> {
 
     pub fn status(&self) -> &str {
         &self.status
+    }
+
+    pub fn editing_title(&self) -> Option<&str> {
+        self.editing_title.as_deref()
     }
 
     pub fn current_project_label(&self) -> Option<&str> {
@@ -386,5 +438,76 @@ mod tests {
         assert_eq!(app.projects_list_state().selected(), Some(1));
         assert_eq!(app.sessions_list_state().selected(), Some(0)); // reset on project change
         assert_eq!(app.current_sessions().len(), 2);
+    }
+
+    #[test]
+    fn start_edit_title_prefills_existing_title() {
+        let mut app = make_app(&[2]);
+        app.projects[0].sessions[0].title = Some("Existing Title".into());
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        assert_eq!(app.editing_title(), Some("Existing Title"));
+    }
+
+    #[test]
+    fn start_edit_title_empty_when_no_title() {
+        let mut app = make_app(&[2]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        assert_eq!(app.editing_title(), Some(""));
+    }
+
+    #[test]
+    fn start_edit_title_noop_in_projects_pane() {
+        let mut app = make_app(&[2]);
+        // active_pane starts as Projects
+        app.dispatch(Action::StartEditTitle).unwrap();
+        assert_eq!(app.editing_title(), None);
+    }
+
+    #[test]
+    fn cancel_edit_title_clears_buffer() {
+        let mut app = make_app(&[2]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar('H')).unwrap();
+        app.dispatch(Action::CancelEditTitle).unwrap();
+        assert_eq!(app.editing_title(), None);
+        assert_eq!(app.current_session().unwrap().title, None); // title unchanged
+    }
+
+    #[test]
+    fn confirm_edit_title_updates_session_and_clears_buffer() {
+        let mut app = make_app(&[2]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        for c in "New Title".chars() {
+            app.dispatch(Action::EditTitleChar(c)).unwrap();
+        }
+        app.dispatch(Action::ConfirmEditTitle).unwrap();
+        assert_eq!(app.editing_title(), None);
+        assert_eq!(app.current_session().unwrap().title.as_deref(), Some("New Title"));
+    }
+
+    #[test]
+    fn confirm_edit_title_ignores_whitespace_only_input() {
+        let mut app = make_app(&[2]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar(' ')).unwrap();
+        app.dispatch(Action::ConfirmEditTitle).unwrap();
+        assert_eq!(app.editing_title(), None);
+        assert_eq!(app.current_session().unwrap().title, None); // not updated
+    }
+
+    #[test]
+    fn edit_title_backspace_removes_last_char() {
+        let mut app = make_app(&[1]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar('H')).unwrap();
+        app.dispatch(Action::EditTitleChar('i')).unwrap();
+        app.dispatch(Action::EditTitleBackspace).unwrap();
+        assert_eq!(app.editing_title(), Some("H"));
     }
 }

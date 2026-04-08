@@ -111,7 +111,16 @@ where
             continue;
         }
 
-        let action = if app.delete_pending() {
+        let action = if app.editing_title().is_some() {
+            // Title edit mode: intercept all keys for the input buffer.
+            match key.code {
+                KeyCode::Esc => Action::CancelEditTitle,
+                KeyCode::Enter => Action::ConfirmEditTitle,
+                KeyCode::Backspace => Action::EditTitleBackspace,
+                KeyCode::Char(c) => Action::EditTitleChar(c),
+                _ => continue,
+            }
+        } else if app.delete_pending() {
             // Confirmation overlay: only these keys are meaningful.
             match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => Action::ConfirmDelete,
@@ -131,6 +140,7 @@ where
                 | KeyCode::Char('l') => Action::SwitchPane,
                 KeyCode::Enter => Action::Resume,
                 KeyCode::Char('d') => Action::RequestDelete,
+                KeyCode::Char('e') => Action::StartEditTitle,
                 KeyCode::Char('y') => Action::CopyMessage,
                 _ => continue,
             }
