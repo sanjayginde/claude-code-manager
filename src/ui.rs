@@ -153,8 +153,7 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
         .iter()
         .enumerate()
         .map(|(i, s)| {
-            let title_line = if editing_buf.is_some() && selected_idx == Some(i) {
-                let buf = editing_buf.unwrap();
+            let title_line = if let Some(buf) = editing_buf && selected_idx == Some(i) {
                 Line::from(vec![
                     Span::raw(" "),
                     Span::styled(buf, Style::default().fg(Color::Rgb(250, 189, 47))),

@@ -140,11 +140,17 @@ impl<F: Filesystem> App<F> {
             }
             Action::Quit => Ok(Response::Quit),
             Action::TitleUpdate { uuid, title } => {
-                for p in &mut self.projects {
-                    for s in &mut p.sessions {
-                        if s.uuid == uuid {
-                            s.title = Some(title);
-                            return Ok(Response::Continue);
+                // Don't overwrite the title of the session currently being edited —
+                // the user's in-flight buffer is the authoritative state right now.
+                let being_edited = self.editing_title.is_some()
+                    && self.current_session().is_some_and(|s| s.uuid == uuid);
+                if !being_edited {
+                    for p in &mut self.projects {
+                        for s in &mut p.sessions {
+                            if s.uuid == uuid {
+                                s.title = Some(title);
+                                return Ok(Response::Continue);
+                            }
                         }
                     }
                 }
@@ -509,5 +515,33 @@ mod tests {
         app.dispatch(Action::EditTitleChar('i')).unwrap();
         app.dispatch(Action::EditTitleBackspace).unwrap();
         assert_eq!(app.editing_title(), Some("H"));
+    }
+
+    #[test]
+    fn title_update_does_not_clobber_session_being_edited() {
+        let mut app = make_app(&[2]);
+        let uuid = app.projects[0].sessions[0].uuid.clone();
+        app.dispatch(Action::SwitchPane).unwrap();
+        // Start editing the first session
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar('M')).unwrap();
+        // Async title arrives for the same session while editing
+        app.dispatch(Action::TitleUpdate { uuid: uuid.clone(), title: "Async Title".into() }).unwrap();
+        // Edit buffer is intact, session.title was NOT overwritten
+        assert_eq!(app.editing_title(), Some("M"));
+        assert_eq!(app.current_session().unwrap().title, None);
+    }
+
+    #[test]
+    fn title_update_applies_normally_for_other_sessions() {
+        let mut app = make_app(&[2]);
+        let other_uuid = app.projects[0].sessions[1].uuid.clone();
+        app.dispatch(Action::SwitchPane).unwrap();
+        // Start editing session 0
+        app.dispatch(Action::StartEditTitle).unwrap();
+        // Title arrives for session 1 (not being edited)
+        app.dispatch(Action::TitleUpdate { uuid: other_uuid.clone(), title: "Other Title".into() }).unwrap();
+        // Session 1 title was updated normally
+        assert_eq!(app.projects[0].sessions[1].title.as_deref(), Some("Other Title"));
     }
 }
