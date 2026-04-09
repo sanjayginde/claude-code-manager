@@ -45,6 +45,22 @@ struct ContentBlock {
     text: Option<String>,
 }
 
+/// The state of a session's cached title.
+///
+/// Distinguishes three states that `Option<String>` cannot: a title that was
+/// never generated, one that loaded successfully, and one whose cache file
+/// exists but could not be read. The title service uses this to avoid
+/// attempting to save a title to a location that has already proven unwritable.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SessionTitle {
+    /// No `.title` cache file exists — normal state for an untitled session.
+    Absent,
+    /// `.title` file was read successfully.
+    Loaded(String),
+    /// `.title` file exists but could not be read (permissions, corruption, etc.).
+    Unreadable,
+}
+
 #[derive(Debug, Clone)]
 pub struct Session {
     pub uuid: String,
@@ -52,9 +68,12 @@ pub struct Session {
     pub cwd: PathBuf,
     pub git_branch: Option<String>,
     pub first_message: Option<String>,
-    pub title: Option<String>,
+    pub title: SessionTitle,
     pub last_modified: SystemTime,
     pub size_bytes: u64,
+    /// Set when the JSONL header could not be read (I/O error).
+    /// `None` means the session loaded cleanly.
+    pub parse_error: Option<String>,
 }
 
 impl Session {
@@ -63,7 +82,11 @@ impl Session {
     }
 
     pub fn needs_title(&self) -> bool {
-        self.title.is_none() && self.first_message.is_some()
+        self.title == SessionTitle::Absent && self.first_message.is_some()
+    }
+
+    pub fn is_degraded(&self) -> bool {
+        self.parse_error.is_some()
     }
 }
 
@@ -141,17 +164,27 @@ fn load_sessions(dir: &Path) -> anyhow::Result<Vec<Session>> {
         let last_modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
         let size_bytes = meta.len();
 
-        let (cwd, git_branch, first_message) = parse_header(&path).unwrap_or_default();
+        let (cwd, git_branch, first_message, parse_error) = match parse_header(&path) {
+            Ok((cwd, branch, msg)) => (cwd, branch, msg, None),
+            Err(e) => (None, None, None, Some(e.to_string())),
+        };
 
         let title = {
             let cp = path.with_extension("title");
             if cp.exists() {
-                std::fs::read_to_string(&cp)
-                    .ok()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
+                match std::fs::read_to_string(&cp) {
+                    Ok(s) => {
+                        let trimmed = s.trim().to_string();
+                        if trimmed.is_empty() {
+                            SessionTitle::Absent
+                        } else {
+                            SessionTitle::Loaded(trimmed)
+                        }
+                    }
+                    Err(_) => SessionTitle::Unreadable,
+                }
             } else {
-                None
+                SessionTitle::Absent
             }
         };
 
@@ -164,6 +197,7 @@ fn load_sessions(dir: &Path) -> anyhow::Result<Vec<Session>> {
             title,
             last_modified,
             size_bytes,
+            parse_error,
         });
     }
 
@@ -392,5 +426,58 @@ mod tests {
         );
         let (_, _, msg) = parse(&line);
         assert_eq!(msg.as_deref(), Some("foo"));
+    }
+
+    // ── SessionTitle / needs_title / is_degraded ──────────────────────────────
+
+    fn make_session(title: SessionTitle, first_message: Option<&str>, parse_error: Option<&str>) -> Session {
+        Session {
+            uuid: "test-uuid".into(),
+            jsonl_path: std::path::PathBuf::from("/tmp/test.jsonl"),
+            cwd: std::path::PathBuf::from("/tmp"),
+            git_branch: None,
+            first_message: first_message.map(String::from),
+            title,
+            last_modified: std::time::SystemTime::UNIX_EPOCH,
+            size_bytes: 0,
+            parse_error: parse_error.map(String::from),
+        }
+    }
+
+    #[test]
+    fn needs_title_true_when_absent_and_has_message() {
+        let s = make_session(SessionTitle::Absent, Some("hello"), None);
+        assert!(s.needs_title());
+    }
+
+    #[test]
+    fn needs_title_false_when_title_loaded() {
+        let s = make_session(SessionTitle::Loaded("My Title".into()), Some("hello"), None);
+        assert!(!s.needs_title());
+    }
+
+    #[test]
+    fn needs_title_false_when_no_first_message() {
+        let s = make_session(SessionTitle::Absent, None, None);
+        assert!(!s.needs_title());
+    }
+
+    #[test]
+    fn needs_title_false_when_title_unreadable() {
+        // Unreadable means the cache file exists but is corrupt — don't retry.
+        let s = make_session(SessionTitle::Unreadable, Some("hello"), None);
+        assert!(!s.needs_title());
+    }
+
+    #[test]
+    fn is_degraded_false_for_clean_session() {
+        let s = make_session(SessionTitle::Absent, Some("hello"), None);
+        assert!(!s.is_degraded());
+    }
+
+    #[test]
+    fn is_degraded_true_when_parse_error_set() {
+        let s = make_session(SessionTitle::Absent, None, Some("failed to open file: permission denied"));
+        assert!(s.is_degraded());
     }
 }
