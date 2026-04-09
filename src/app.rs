@@ -21,6 +21,19 @@ impl Pane {
     }
 }
 
+/// The active input mode of the application.
+///
+/// `tui_loop` dispatches key events based solely on this value — no knowledge
+/// of individual `App` fields required. Adding a new modal means adding a
+/// variant here and a routing arm in `tui_loop`, with the compiler enforcing
+/// that both are handled.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Modal {
+    None,
+    EditTitle,
+    ConfirmDelete,
+}
+
 pub enum Action {
     NavUp,
     NavDown,
@@ -202,6 +215,17 @@ impl App {
 
     pub fn active_pane(&self) -> Pane {
         self.active_pane
+    }
+
+    /// The active input mode. `tui_loop` routes key events based solely on this.
+    pub fn modal(&self) -> Modal {
+        if self.editing_title.is_some() {
+            Modal::EditTitle
+        } else if self.delete_pending {
+            Modal::ConfirmDelete
+        } else {
+            Modal::None
+        }
     }
 
     pub fn delete_pending(&self) -> bool {
@@ -527,5 +551,45 @@ mod tests {
         app.dispatch(Action::TitleUpdate { uuid: other_uuid.clone(), title: "Other Title".into() }).unwrap();
         // Session 1 title was updated normally
         assert_eq!(app.projects[0].sessions[1].title, SessionTitle::Loaded("Other Title".into()));
+    }
+
+    // ── modal() ───────────────────────────────────────────────────────────────
+
+    #[test]
+    fn modal_is_none_by_default() {
+        let app = make_app(&[1]);
+        assert_eq!(app.modal(), Modal::None);
+    }
+
+    #[test]
+    fn modal_is_edit_title_while_editing() {
+        let mut app = make_app(&[1]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        assert_eq!(app.modal(), Modal::EditTitle);
+        // cancelling returns to None
+        app.dispatch(Action::CancelEditTitle).unwrap();
+        assert_eq!(app.modal(), Modal::None);
+    }
+
+    #[test]
+    fn modal_is_confirm_delete_while_pending() {
+        let mut app = make_app(&[1]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::RequestDelete).unwrap();
+        assert_eq!(app.modal(), Modal::ConfirmDelete);
+        // cancelling returns to None
+        app.dispatch(Action::CancelDelete).unwrap();
+        assert_eq!(app.modal(), Modal::None);
+    }
+
+    #[test]
+    fn modal_is_none_after_delete_confirmed() {
+        let mut app = make_app(&[2]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::RequestDelete).unwrap();
+        assert_eq!(app.modal(), Modal::ConfirmDelete);
+        app.dispatch(Action::ConfirmDelete).unwrap();
+        assert_eq!(app.modal(), Modal::None);
     }
 }
