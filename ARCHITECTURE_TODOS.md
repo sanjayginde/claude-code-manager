@@ -2,6 +2,7 @@
 
 Candidates identified during the `/improve-codebase-architecture` session (2026-04-08).
 Candidates 1 (Session Lifecycle) and 2 (SessionStore) are done — see PRs #25 and #27.
+Candidate 4 (Title Service) is done — see PR #30.
 
 ---
 
