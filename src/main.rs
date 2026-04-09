@@ -7,7 +7,7 @@ mod ui;
 
 use std::sync::Arc;
 
-use app::{Action, App, Response};
+use app::{Action, App, Modal, Response};
 use session_store::FsSessionStore;
 use title_service::{AnthropicTitleService, TitleService};
 use crossterm::{
@@ -115,24 +115,20 @@ where
             continue;
         }
 
-        let action = if app.editing_title().is_some() {
-            // Title edit mode: intercept all keys for the input buffer.
-            match key.code {
+        let action = match app.modal() {
+            Modal::EditTitle => match key.code {
                 KeyCode::Esc => Action::CancelEditTitle,
                 KeyCode::Enter => Action::ConfirmEditTitle,
                 KeyCode::Backspace => Action::EditTitleBackspace,
                 KeyCode::Char(c) => Action::EditTitleChar(c),
                 _ => continue,
-            }
-        } else if app.delete_pending() {
-            // Confirmation overlay: only these keys are meaningful.
-            match key.code {
+            },
+            Modal::ConfirmDelete => match key.code {
                 KeyCode::Char('y') | KeyCode::Char('Y') => Action::ConfirmDelete,
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => Action::CancelDelete,
                 _ => continue,
-            }
-        } else {
-            match key.code {
+            },
+            Modal::None => match key.code {
                 KeyCode::Char('q') => Action::Quit,
                 KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => Action::Quit,
                 KeyCode::Up | KeyCode::Char('k') => Action::NavUp,
@@ -147,7 +143,7 @@ where
                 KeyCode::Char('e') => Action::StartEditTitle,
                 KeyCode::Char('y') => Action::CopyMessage,
                 _ => continue,
-            }
+            },
         };
 
         match app.dispatch(action)? {
