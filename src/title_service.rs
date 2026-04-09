@@ -67,10 +67,7 @@ impl TitleService for AnthropicTitleService {
                 let _permit = sem.acquire().await.unwrap();
                 if let Some(title) = crate::titles::generate_title(&msg).await {
                     if let Err(e) = store.save_title(&sess_clone, &title) {
-                        eprintln!(
-                            "warning: failed to save title for session {}: {e}",
-                            &uuid[..8.min(uuid.len())]
-                        );
+                        eprintln!("warning: failed to save title for session: {e}");
                     }
                     let _ = tx.send((uuid, title));
                 }
