@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use app::{Action, App, Modal, Response};
 use session_store::FsSessionStore;
-use title_service::{AnthropicTitleService, TitleService};
+use title_service::{AnthropicTitleService, TitleHandle, TitleService};
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
@@ -17,7 +17,6 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::time::Duration;
 
 enum Outcome {
@@ -30,14 +29,12 @@ async fn main() -> anyhow::Result<()> {
     let store: session_store::DynStore = Arc::new(FsSessionStore::new()?);
     let projects = store.load()?;
 
-    let (tx, rx) = mpsc::channel::<(String, String)>();
-
     let all_sessions: Vec<&data::Session> =
         projects.iter().flat_map(|p| p.sessions.iter()).collect();
-    AnthropicTitleService { store: Arc::clone(&store) }.start(&all_sessions, tx);
+    let title_handle = AnthropicTitleService { store: Arc::clone(&store) }.start(&all_sessions);
 
     let app = App::new(projects, store);
-    let outcome = run_tui(app, rx)?;
+    let outcome = run_tui(app, title_handle)?;
 
     if let Outcome::Resume { cwd, uuid } = outcome {
         if cwd.as_os_str().is_empty() || !cwd.exists() {
@@ -72,18 +69,19 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_tui(mut app: App, rx: mpsc::Receiver<(String, String)>) -> anyhow::Result<Outcome> {
+fn run_tui(mut app: App, handle: TitleHandle) -> anyhow::Result<Outcome> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let outcome = tui_loop(&mut terminal, &mut app, &rx);
+    let outcome = tui_loop(&mut terminal, &mut app, &handle.rx);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     terminal.show_cursor()?;
+    handle.cancel(); // abort any in-flight title generation tasks
 
     outcome
 }
@@ -91,7 +89,7 @@ fn run_tui(mut app: App, rx: mpsc::Receiver<(String, String)>) -> anyhow::Result
 fn tui_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
-    rx: &mpsc::Receiver<(String, String)>,
+    rx: &std::sync::mpsc::Receiver<(String, String)>,
 ) -> anyhow::Result<Outcome>
 where
     B::Error: Send + Sync + 'static,

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use arboard::Clipboard;
 use ratatui::widgets::ListState;
 
-use crate::data::{Project, Session};
+use crate::data::{Project, Session, SessionTitle};
 use crate::session_store::DynStore;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -155,7 +155,7 @@ impl App {
                     for p in &mut self.projects {
                         for s in &mut p.sessions {
                             if s.uuid == uuid {
-                                s.title = Some(title);
+                                s.title = SessionTitle::Loaded(title);
                                 return Ok(Response::Continue);
                             }
                         }
@@ -165,10 +165,10 @@ impl App {
             }
             Action::StartEditTitle => {
                 if self.active_pane == Pane::Sessions && self.current_session().is_some() {
-                    let prefill = self
-                        .current_session()
-                        .and_then(|s| s.title.clone())
-                        .unwrap_or_default();
+                    let prefill = match self.current_session().map(|s| &s.title) {
+                        Some(SessionTitle::Loaded(t)) => t.clone(),
+                        _ => String::new(),
+                    };
                     self.editing_title = Some(prefill);
                 }
                 Ok(Response::Continue)
@@ -197,7 +197,7 @@ impl App {
                         let si = self.selection.session;
                         if let Some(sess) = self.projects.get_mut(pi).and_then(|p| p.sessions.get_mut(si)) {
                             self.store.save_title(sess, &trimmed)?;
-                            sess.title = Some(trimmed);
+                            sess.title = SessionTitle::Loaded(trimmed);
                             self.status = "Title updated.".into();
                         }
                     }
@@ -351,7 +351,7 @@ mod tests {
     use std::time::SystemTime;
 
     use super::*;
-    use crate::data::Session;
+    use crate::data::{Session, SessionTitle};
     use crate::session_store::NullSessionStore;
 
     fn make_session(uuid: &str) -> Session {
@@ -361,9 +361,10 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             git_branch: None,
             first_message: Some("hello".into()),
-            title: None,
+            title: SessionTitle::Absent,
             last_modified: SystemTime::UNIX_EPOCH,
             size_bytes: 0,
+            parse_error: None,
         }
     }
 
@@ -456,7 +457,7 @@ mod tests {
     #[test]
     fn start_edit_title_prefills_existing_title() {
         let mut app = make_app(&[2]);
-        app.projects[0].sessions[0].title = Some("Existing Title".into());
+        app.projects[0].sessions[0].title = SessionTitle::Loaded("Existing Title".into());
         app.dispatch(Action::SwitchPane).unwrap();
         app.dispatch(Action::StartEditTitle).unwrap();
         assert_eq!(app.editing_title(), Some("Existing Title"));
@@ -486,7 +487,7 @@ mod tests {
         app.dispatch(Action::EditTitleChar('H')).unwrap();
         app.dispatch(Action::CancelEditTitle).unwrap();
         assert_eq!(app.editing_title(), None);
-        assert_eq!(app.current_session().unwrap().title, None); // title unchanged
+        assert_eq!(app.current_session().unwrap().title, SessionTitle::Absent); // title unchanged
     }
 
     #[test]
@@ -499,7 +500,7 @@ mod tests {
         }
         app.dispatch(Action::ConfirmEditTitle).unwrap();
         assert_eq!(app.editing_title(), None);
-        assert_eq!(app.current_session().unwrap().title.as_deref(), Some("New Title"));
+        assert_eq!(app.current_session().unwrap().title, SessionTitle::Loaded("New Title".into()));
     }
 
     #[test]
@@ -510,7 +511,7 @@ mod tests {
         app.dispatch(Action::EditTitleChar(' ')).unwrap();
         app.dispatch(Action::ConfirmEditTitle).unwrap();
         assert_eq!(app.editing_title(), None);
-        assert_eq!(app.current_session().unwrap().title, None); // not updated
+        assert_eq!(app.current_session().unwrap().title, SessionTitle::Absent); // not updated
     }
 
     #[test]
@@ -536,7 +537,7 @@ mod tests {
         app.dispatch(Action::TitleUpdate { uuid: uuid.clone(), title: "Async Title".into() }).unwrap();
         // Edit buffer is intact, session.title was NOT overwritten
         assert_eq!(app.editing_title(), Some("M"));
-        assert_eq!(app.current_session().unwrap().title, None);
+        assert_eq!(app.current_session().unwrap().title, SessionTitle::Absent);
     }
 
     #[test]
@@ -549,7 +550,7 @@ mod tests {
         // Title arrives for session 1 (not being edited)
         app.dispatch(Action::TitleUpdate { uuid: other_uuid.clone(), title: "Other Title".into() }).unwrap();
         // Session 1 title was updated normally
-        assert_eq!(app.projects[0].sessions[1].title.as_deref(), Some("Other Title"));
+        assert_eq!(app.projects[0].sessions[1].title, SessionTitle::Loaded("Other Title".into()));
     }
 
     // ── modal() ───────────────────────────────────────────────────────────────

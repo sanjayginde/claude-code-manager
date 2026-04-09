@@ -1,7 +1,7 @@
 use std::time::SystemTime;
 
 use crate::app::{App, Pane};
-use crate::data::Session;
+use crate::data::{Session, SessionTitle};
 use ratatui::{
     prelude::*,
     widgets::*,
@@ -10,7 +10,7 @@ use ratatui::{
 // ── Session display formatting ────────────────────────────────────────────────
 
 pub fn session_title(s: &Session) -> String {
-    if let Some(t) = &s.title {
+    if let SessionTitle::Loaded(t) = &s.title {
         return t.clone();
     }
     if let Some(msg) = &s.first_message {
@@ -162,7 +162,11 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
             } else {
                 Line::from(Span::raw(format!(" {}", session_title(s))))
             };
-            let branch = s.git_branch.as_deref().unwrap_or("?");
+            let branch = if s.is_degraded() {
+                "[parse error]"
+            } else {
+                s.git_branch.as_deref().unwrap_or("?")
+            };
             let meta = format!(
                 "   {} · {} · {}",
                 branch,
@@ -280,9 +284,13 @@ mod tests {
             cwd: PathBuf::from("/tmp"),
             git_branch: None,
             first_message: first_message.map(String::from),
-            title: title.map(String::from),
+            title: match title {
+                Some(t) => SessionTitle::Loaded(t.to_string()),
+                None => SessionTitle::Absent,
+            },
             last_modified: SystemTime::UNIX_EPOCH,
             size_bytes,
+            parse_error: None,
         }
     }
 
