@@ -94,12 +94,14 @@ fn tui_loop<B: Backend>(
 where
     B::Error: Send + Sync + 'static,
 {
+    let theme = ui::Theme::gruvbox_dark();
+
     loop {
         while let Ok((uuid, title)) = rx.try_recv() {
             app.dispatch(Action::TitleUpdate { uuid, title })?;
         }
 
-        terminal.draw(|f| ui::render(f, app))?;
+        terminal.draw(|f| ui::render(f, app, &theme))?;
 
         if !event::poll(Duration::from_millis(100))? {
             continue;

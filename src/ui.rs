@@ -7,6 +7,39 @@ use ratatui::{
     widgets::*,
 };
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+pub struct Theme {
+    /// Active pane border and edit-mode cursor/text.
+    pub active: Color,
+    /// Inactive pane border and selection highlight background.
+    pub inactive: Color,
+    /// Secondary / meta text (counts, branch, age, size).
+    pub meta: Color,
+    /// Preview pane body text.
+    pub preview_text: Color,
+    /// Transient app status messages (e.g. "Copied!").
+    pub status_msg: Color,
+    /// Keyboard hint bar text.
+    pub hint: Color,
+    /// Danger / destructive action (delete confirm).
+    pub danger: Color,
+}
+
+impl Theme {
+    pub fn gruvbox_dark() -> Self {
+        Self {
+            active:       Color::Rgb(250, 189, 47),
+            inactive:     Color::Rgb(80, 73, 69),
+            meta:         Color::Rgb(168, 153, 132),
+            preview_text: Color::Gray,
+            status_msg:   Color::Yellow,
+            hint:         Color::DarkGray,
+            danger:       Color::Red,
+        }
+    }
+}
+
 // ── Session display formatting ────────────────────────────────────────────────
 
 pub fn session_title(s: &Session) -> String {
@@ -72,7 +105,7 @@ pub fn session_size(s: &Session) -> String {
     }
 }
 
-pub fn render(frame: &mut Frame, app: &App) {
+pub fn render(frame: &mut Frame, app: &App, theme: &Theme) {
     let area = frame.area();
 
     let chunks = Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).split(area);
@@ -87,22 +120,22 @@ pub fn render(frame: &mut Frame, app: &App) {
     let mut proj_state = app.projects_list_state();
     let mut sess_state = app.sessions_list_state();
 
-    render_projects(frame, app, panes[0], &mut proj_state);
-    render_sessions(frame, app, right[0], &mut sess_state);
-    render_preview(frame, app, right[1]);
-    render_status(frame, app, chunks[1]);
+    render_projects(frame, app, panes[0], &mut proj_state, theme);
+    render_sessions(frame, app, right[0], &mut sess_state, theme);
+    render_preview(frame, app, right[1], theme);
+    render_status(frame, app, chunks[1], theme);
 
     if app.delete_pending() {
-        render_confirm(frame, area);
+        render_confirm(frame, area, theme);
     }
 }
 
-fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui::widgets::ListState) {
+fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui::widgets::ListState, theme: &Theme) {
     let active = app.active_pane() == Pane::Projects;
     let border_style = if active {
-        Style::default().fg(Color::Rgb(250, 189, 47))
+        Style::default().fg(theme.active)
     } else {
-        Style::default().fg(Color::Rgb(80, 73, 69))
+        Style::default().fg(theme.inactive)
     };
 
     let items: Vec<ListItem> = app
@@ -114,7 +147,7 @@ fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
                 Span::raw(format!(" {} ", p.label)),
                 Span::styled(
                     format!("[{count}]"),
-                    Style::default().fg(Color::Rgb(168, 153, 132)),
+                    Style::default().fg(theme.meta),
                 ),
             ]))
         })
@@ -128,8 +161,8 @@ fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
         )
         .highlight_style(
             Style::default()
-                .bg(Color::Rgb(80, 73, 69))
-                .fg(Color::Rgb(250, 189, 47))
+                .bg(theme.inactive)
+                .fg(theme.active)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("> ");
@@ -137,12 +170,12 @@ fn render_projects(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
     frame.render_stateful_widget(list, area, state);
 }
 
-fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui::widgets::ListState) {
+fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui::widgets::ListState, theme: &Theme) {
     let active = app.active_pane() == Pane::Sessions;
     let border_style = if active {
-        Style::default().fg(Color::Rgb(250, 189, 47))
+        Style::default().fg(theme.active)
     } else {
-        Style::default().fg(Color::Rgb(80, 73, 69))
+        Style::default().fg(theme.inactive)
     };
 
     let selected_idx = app.sessions_list_state().selected();
@@ -156,8 +189,8 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
             let title_line = if let Some(buf) = editing_buf && selected_idx == Some(i) {
                 Line::from(vec![
                     Span::raw(" "),
-                    Span::styled(buf, Style::default().fg(Color::Rgb(250, 189, 47))),
-                    Span::styled("█", Style::default().fg(Color::Rgb(250, 189, 47))),
+                    Span::styled(buf, Style::default().fg(theme.active)),
+                    Span::styled("█", Style::default().fg(theme.active)),
                 ])
             } else {
                 Line::from(Span::raw(format!(" {}", session_title(s))))
@@ -175,7 +208,7 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
             );
             ListItem::new(Text::from(vec![
                 title_line,
-                Line::from(Span::styled(meta, Style::default().fg(Color::Rgb(168, 153, 132)))),
+                Line::from(Span::styled(meta, Style::default().fg(theme.meta))),
             ]))
         })
         .collect();
@@ -193,8 +226,8 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
         )
         .highlight_style(
             Style::default()
-                .bg(Color::Rgb(80, 73, 69))
-                .fg(Color::Rgb(250, 189, 47))
+                .bg(theme.inactive)
+                .fg(theme.active)
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("> ");
@@ -202,16 +235,16 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
     frame.render_stateful_widget(list, area, state);
 }
 
-fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
+fn render_preview(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     let text = app
         .current_session()
         .and_then(|s| s.first_message.as_deref())
         .unwrap_or("");
 
     let border_style = if app.active_pane() == Pane::Sessions {
-        Style::default().fg(Color::Rgb(250, 189, 47))
+        Style::default().fg(theme.active)
     } else {
-        Style::default().fg(Color::Rgb(80, 73, 69))
+        Style::default().fg(theme.inactive)
     };
 
     frame.render_widget(
@@ -222,30 +255,30 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
                     .title(" Message ")
                     .border_style(border_style),
             )
-            .style(Style::default().fg(Color::Gray)),
+            .style(Style::default().fg(theme.preview_text)),
         area,
     );
 }
 
-fn render_status(frame: &mut Frame, app: &App, area: Rect) {
+fn render_status(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     let status = app.status();
     let (msg, style): (&str, Style) = if app.editing_title().is_some() {
         (
             " [Enter] Confirm title  [Esc] Cancel",
-            Style::default().fg(Color::Rgb(250, 189, 47)),
+            Style::default().fg(theme.active),
         )
     } else if !status.is_empty() {
-        (status, Style::default().fg(Color::Yellow))
+        (status, Style::default().fg(theme.status_msg))
     } else {
         (
             " [↑↓/jk] Navigate  [Tab] Switch pane  [Enter] Resume  [e] Edit title  [y] Copy  [d] Delete  [q] Quit",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme.hint),
         )
     };
     frame.render_widget(Paragraph::new(Span::styled(msg, style)), area);
 }
 
-fn render_confirm(frame: &mut Frame, area: Rect) {
+fn render_confirm(frame: &mut Frame, area: Rect, theme: &Theme) {
     let popup = centered_rect(44, 6, area);
     frame.render_widget(Clear, popup);
     frame.render_widget(
@@ -254,7 +287,7 @@ fn render_confirm(frame: &mut Frame, area: Rect) {
             Line::from(Span::styled(
                 "  Delete this session? This cannot be undone.",
                 Style::default()
-                    .fg(Color::Red)
+                    .fg(theme.danger)
                     .add_modifier(Modifier::BOLD),
             )),
             Line::from(""),
@@ -266,7 +299,7 @@ fn render_confirm(frame: &mut Frame, area: Rect) {
         .block(
             Block::bordered()
                 .title(" Confirm Delete ")
-                .border_style(Style::default().fg(Color::Red)),
+                .border_style(Style::default().fg(theme.danger)),
         ),
         popup,
     );
