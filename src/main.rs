@@ -1,4 +1,5 @@
 mod app;
+mod config;
 mod data;
 mod session_store;
 mod title_service;
@@ -26,6 +27,10 @@ enum Outcome {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let cli_theme = parse_theme_flag();
+    let config = config::Config::load();
+    let theme = resolve_theme(cli_theme.as_deref(), &config);
+
     let store: session_store::DynStore = Arc::new(FsSessionStore::new()?);
     let projects = store.load()?;
 
@@ -34,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
     let title_handle = AnthropicTitleService { store: Arc::clone(&store) }.start(&all_sessions);
 
     let app = App::new(projects, store);
-    let outcome = run_tui(app, title_handle)?;
+    let outcome = run_tui(app, title_handle, theme)?;
 
     if let Outcome::Resume { cwd, uuid } = outcome {
         if cwd.as_os_str().is_empty() || !cwd.exists() {
@@ -69,14 +74,33 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn run_tui(mut app: App, handle: TitleHandle) -> anyhow::Result<Outcome> {
+/// Returns the value of `--theme <name>` if present on the command line.
+fn parse_theme_flag() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+    args.windows(2)
+        .find(|w| w[0] == "--theme")
+        .map(|w| w[1].clone())
+}
+
+/// Resolve the final theme: CLI flag > config file `theme` > default.
+/// Config `[colors]` overrides are applied on top of whatever theme is selected.
+fn resolve_theme(cli_theme: Option<&str>, config: &config::Config) -> ui::Theme {
+    let name = cli_theme.or(config.theme.as_deref());
+    let mut theme = name
+        .and_then(ui::Theme::from_name)
+        .unwrap_or_else(ui::Theme::gruvbox_dark);
+    theme.apply_overrides(&config.colors);
+    theme
+}
+
+fn run_tui(mut app: App, handle: TitleHandle, theme: ui::Theme) -> anyhow::Result<Outcome> {
     enable_raw_mode()?;
     let mut stdout = std::io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let outcome = tui_loop(&mut terminal, &mut app, &handle.rx);
+    let outcome = tui_loop(&mut terminal, &mut app, &handle.rx, theme);
 
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
@@ -90,16 +114,18 @@ fn tui_loop<B: Backend>(
     terminal: &mut Terminal<B>,
     app: &mut App,
     rx: &std::sync::mpsc::Receiver<(String, String)>,
+    theme: ui::Theme,
 ) -> anyhow::Result<Outcome>
 where
     B::Error: Send + Sync + 'static,
 {
+
     loop {
         while let Ok((uuid, title)) = rx.try_recv() {
             app.dispatch(Action::TitleUpdate { uuid, title })?;
         }
 
-        terminal.draw(|f| ui::render(f, app))?;
+        terminal.draw(|f| ui::render(f, app, &theme))?;
 
         if !event::poll(Duration::from_millis(100))? {
             continue;
