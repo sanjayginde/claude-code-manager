@@ -33,5 +33,5 @@ impl Config {
 }
 
 fn config_path() -> Option<PathBuf> {
-    dirs::config_dir().map(|d| d.join("ccm").join("config.toml"))
+    dirs::home_dir().map(|h| h.join(".config").join("ccm").join("config.toml"))
 }
