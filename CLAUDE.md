@@ -18,7 +18,7 @@ cargo clippy -- -D warnings          # lint (strict: warnings = errors)
 cargo install --path .               # install the binary
 ```
 
-CI runs clippy, build, and test on every push.
+CI runs clippy, build, and test on pushes to `main` and on PRs targeting `main`.
 
 ## Architecture
 
