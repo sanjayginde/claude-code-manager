@@ -36,7 +36,7 @@ ccm
 | Key | Action |
 |-----|--------|
 | `↑↓` / `jk` | Navigate |
-| `Tab` / `←→` / `hl` | Switch pane |
+| `Tab` / `←→` / `h` / `l` | Switch pane |
 | `Enter` | Resume session / switch to sessions pane |
 | `e` | Edit session title inline |
 | `y` | Copy first message to clipboard |
