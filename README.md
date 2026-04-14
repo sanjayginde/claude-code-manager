@@ -11,6 +11,8 @@ A terminal UI for browsing and resuming [Claude Code](https://claude.ai/code) se
 - AI-generated concise titles for each session (cached locally, powered by Claude Haiku)
 - Full first message preview when navigating sessions
 - Resume any session — `ccm` `cd`s to the original project directory and hands off to `claude --resume`
+- Edit session titles inline
+- Copy the first message to the clipboard
 - Delete old sessions with confirmation
 
 ## Installation
@@ -34,8 +36,10 @@ ccm
 | Key | Action |
 |-----|--------|
 | `↑↓` / `jk` | Navigate |
-| `Tab` / `←→` | Switch pane |
+| `Tab` / `←→` / `hl` | Switch pane |
 | `Enter` | Resume session / switch to sessions pane |
+| `e` | Edit session title inline |
+| `y` | Copy first message to clipboard |
 | `d` | Delete session (with confirmation) |
 | `q` / `Ctrl+C` | Quit |
 
