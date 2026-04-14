@@ -12,6 +12,7 @@ A terminal UI for browsing and resuming [Claude Code](https://claude.ai/code) se
 - Full first message preview when navigating sessions
 - Resume any session — `ccm` `cd`s to the original project directory and hands off to `claude --resume`
 - Delete old sessions with confirmation
+- Themeable: built-in named themes and per-color config file overrides
 
 ## Installation
 
@@ -26,7 +27,7 @@ cargo install --path .
 ## Usage
 
 ```bash
-ccm
+ccm [--theme <name>]
 ```
 
 ### Keys
@@ -38,6 +39,27 @@ ccm
 | `Enter` | Resume session / switch to sessions pane |
 | `d` | Delete session (with confirmation) |
 | `q` / `Ctrl+C` | Quit |
+
+### Theming
+
+Pass `--theme <name>` on the command line or set `theme` in `~/.config/ccm/config.toml`.
+
+Available themes: `gruvbox-dark` (default), `catppuccin-mocha`, `catppuccin-macchiato`, `catppuccin-frappe`, `catppuccin-latte`
+
+Individual colors can be overridden in the config file regardless of which theme is active:
+
+```toml
+# ~/.config/ccm/config.toml
+theme = "catppuccin-mocha"
+
+[colors]
+active = "#ff9900"   # active pane border, edit cursor
+danger = "#ff0000"   # delete confirmation
+```
+
+Available color keys: `active`, `inactive`, `meta`, `preview_text`, `status_msg`, `hint`, `danger`
+
+Precedence: `--theme` flag > config `theme` > `[colors]` overrides > default (`gruvbox-dark`)
 
 ### AI Titles
 

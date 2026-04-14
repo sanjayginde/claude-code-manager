@@ -17,3 +17,5 @@ reqwest = { version = "0.13", features = ["json"] }
 dirs = "6"
 anyhow = "1"
 arboard = "3"
+catppuccin = { version = "2.7.0", features = ["ratatui"] }
+toml = "1.1.2"

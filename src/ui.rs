@@ -38,6 +38,101 @@ impl Theme {
             danger:       Color::Red,
         }
     }
+
+    pub fn catppuccin_mocha() -> Self {
+        let c = &catppuccin::PALETTE.mocha.colors;
+        Self {
+            active:       c.yellow.into(),
+            inactive:     c.surface1.into(),
+            meta:         c.subtext0.into(),
+            preview_text: c.overlay2.into(),
+            status_msg:   c.peach.into(),
+            hint:         c.overlay0.into(),
+            danger:       c.red.into(),
+        }
+    }
+
+    pub fn catppuccin_macchiato() -> Self {
+        let c = &catppuccin::PALETTE.macchiato.colors;
+        Self {
+            active:       c.yellow.into(),
+            inactive:     c.surface1.into(),
+            meta:         c.subtext0.into(),
+            preview_text: c.overlay2.into(),
+            status_msg:   c.peach.into(),
+            hint:         c.overlay0.into(),
+            danger:       c.red.into(),
+        }
+    }
+
+    pub fn catppuccin_frappe() -> Self {
+        let c = &catppuccin::PALETTE.frappe.colors;
+        Self {
+            active:       c.yellow.into(),
+            inactive:     c.surface1.into(),
+            meta:         c.subtext0.into(),
+            preview_text: c.overlay2.into(),
+            status_msg:   c.peach.into(),
+            hint:         c.overlay0.into(),
+            danger:       c.red.into(),
+        }
+    }
+
+    pub fn catppuccin_latte() -> Self {
+        let c = &catppuccin::PALETTE.latte.colors;
+        Self {
+            active:       c.yellow.into(),
+            inactive:     c.surface1.into(),
+            meta:         c.subtext0.into(),
+            preview_text: c.overlay2.into(),
+            status_msg:   c.peach.into(),
+            hint:         c.overlay0.into(),
+            danger:       c.red.into(),
+        }
+    }
+
+    /// Look up a theme by name. Returns `None` for unknown names.
+    pub fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "gruvbox-dark"          => Some(Self::gruvbox_dark()),
+            "catppuccin-mocha"      => Some(Self::catppuccin_mocha()),
+            "catppuccin-macchiato"  => Some(Self::catppuccin_macchiato()),
+            "catppuccin-frappe"     => Some(Self::catppuccin_frappe()),
+            "catppuccin-latte"      => Some(Self::catppuccin_latte()),
+            _                       => None,
+        }
+    }
+
+    /// Apply per-color overrides from the config file on top of this theme.
+    pub fn apply_overrides(&mut self, overrides: &crate::config::ColorOverrides) {
+        macro_rules! apply {
+            ($field:ident) => {
+                if let Some(ref hex) = overrides.$field {
+                    if let Some(color) = parse_hex_color(hex) {
+                        self.$field = color;
+                    }
+                }
+            };
+        }
+        apply!(active);
+        apply!(inactive);
+        apply!(meta);
+        apply!(preview_text);
+        apply!(status_msg);
+        apply!(hint);
+        apply!(danger);
+    }
+}
+
+fn parse_hex_color(hex: &str) -> Option<Color> {
+    let hex = hex.trim_start_matches('#');
+    if hex.len() != 6 {
+        return None;
+    }
+    let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+    let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+    let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+    Some(Color::Rgb(r, g, b))
 }
 
 // ── Session display formatting ────────────────────────────────────────────────
