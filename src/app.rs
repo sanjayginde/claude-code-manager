@@ -80,7 +80,7 @@ impl App {
                 projects.iter().position(|p| {
                     p.sessions
                         .first()
-                        .map(|s| cwd.starts_with(&s.cwd))
+                        .map(|s| !s.cwd.as_os_str().is_empty() && cwd.starts_with(&s.cwd))
                         .unwrap_or(false)
                 })
             })
@@ -608,6 +608,25 @@ mod tests {
             },
         ];
         let app = App::new(projects, Arc::new(NullSessionStore), Some(PathBuf::from("/home/user/beta/src")));
+        assert_eq!(app.projects_list_state().selected(), Some(1));
+    }
+
+    #[test]
+    fn initial_cwd_skips_project_with_empty_cwd() {
+        let mut empty_session = make_session_with_cwd("s0", "");
+        // Ensure the empty-cwd project sorts first (would be a false match without the guard)
+        empty_session.last_modified = SystemTime::now();
+        let projects = vec![
+            Project {
+                label: "empty-cwd".into(),
+                sessions: vec![empty_session],
+            },
+            Project {
+                label: "proj1".into(),
+                sessions: vec![make_session_with_cwd("s1", "/home/user/beta")],
+            },
+        ];
+        let app = App::new(projects, Arc::new(NullSessionStore), Some(PathBuf::from("/home/user/beta")));
         assert_eq!(app.projects_list_state().selected(), Some(1));
     }
 
