@@ -74,10 +74,20 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(projects: Vec<Project>, store: DynStore) -> Self {
+    pub fn new(projects: Vec<Project>, store: DynStore, cwd: Option<PathBuf>) -> Self {
+        let initial_project = cwd
+            .and_then(|cwd| {
+                projects.iter().position(|p| {
+                    p.sessions
+                        .first()
+                        .map(|s| cwd.starts_with(&s.cwd))
+                        .unwrap_or(false)
+                })
+            })
+            .unwrap_or(0);
         Self {
             projects,
-            selection: Selection { project: 0, session: 0 },
+            selection: Selection { project: initial_project, session: 0 },
             active_pane: Pane::Projects,
             delete_pending: false,
             editing_title: None,
@@ -377,7 +387,21 @@ mod tests {
                 sessions: (0..n).map(|si| make_session(&format!("p{pi}s{si}"))).collect(),
             })
             .collect();
-        App::new(projects, Arc::new(NullSessionStore))
+        App::new(projects, Arc::new(NullSessionStore), None)
+    }
+
+    fn make_session_with_cwd(uuid: &str, cwd: &str) -> Session {
+        Session {
+            uuid: uuid.to_string(),
+            jsonl_path: PathBuf::from(format!("/tmp/{uuid}.jsonl")),
+            cwd: PathBuf::from(cwd),
+            git_branch: None,
+            first_message: Some("hello".into()),
+            title: SessionTitle::Absent,
+            last_modified: SystemTime::UNIX_EPOCH,
+            size_bytes: 0,
+            parse_error: None,
+        }
     }
 
     #[test]
@@ -551,6 +575,58 @@ mod tests {
         app.dispatch(Action::TitleUpdate { uuid: other_uuid.clone(), title: "Other Title".into() }).unwrap();
         // Session 1 title was updated normally
         assert_eq!(app.projects[0].sessions[1].title, SessionTitle::Loaded("Other Title".into()));
+    }
+
+    // ── initial cwd focus ─────────────────────────────────────────────────────
+
+    #[test]
+    fn initial_cwd_selects_matching_project() {
+        let projects = vec![
+            Project {
+                label: "proj0".into(),
+                sessions: vec![make_session_with_cwd("s0", "/home/user/alpha")],
+            },
+            Project {
+                label: "proj1".into(),
+                sessions: vec![make_session_with_cwd("s1", "/home/user/beta")],
+            },
+        ];
+        let app = App::new(projects, Arc::new(NullSessionStore), Some(PathBuf::from("/home/user/beta")));
+        assert_eq!(app.projects_list_state().selected(), Some(1));
+    }
+
+    #[test]
+    fn initial_cwd_matches_subdirectory_of_project_root() {
+        let projects = vec![
+            Project {
+                label: "proj0".into(),
+                sessions: vec![make_session_with_cwd("s0", "/home/user/alpha")],
+            },
+            Project {
+                label: "proj1".into(),
+                sessions: vec![make_session_with_cwd("s1", "/home/user/beta")],
+            },
+        ];
+        let app = App::new(projects, Arc::new(NullSessionStore), Some(PathBuf::from("/home/user/beta/src")));
+        assert_eq!(app.projects_list_state().selected(), Some(1));
+    }
+
+    #[test]
+    fn initial_cwd_no_match_falls_back_to_zero() {
+        let projects = vec![
+            Project {
+                label: "proj0".into(),
+                sessions: vec![make_session_with_cwd("s0", "/home/user/alpha")],
+            },
+        ];
+        let app = App::new(projects, Arc::new(NullSessionStore), Some(PathBuf::from("/home/user/other")));
+        assert_eq!(app.projects_list_state().selected(), Some(0));
+    }
+
+    #[test]
+    fn initial_cwd_none_falls_back_to_zero() {
+        let app = make_app(&[2]);
+        assert_eq!(app.projects_list_state().selected(), Some(0));
     }
 
     // ── modal() ───────────────────────────────────────────────────────────────

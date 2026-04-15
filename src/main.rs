@@ -38,7 +38,8 @@ async fn main() -> anyhow::Result<()> {
         projects.iter().flat_map(|p| p.sessions.iter()).collect();
     let title_handle = AnthropicTitleService { store: Arc::clone(&store) }.start(&all_sessions);
 
-    let app = App::new(projects, store);
+    let cwd = std::env::current_dir().ok();
+    let app = App::new(projects, store, cwd);
     let outcome = run_tui(app, title_handle, theme)?;
 
     if let Outcome::Resume { cwd, uuid } = outcome {
