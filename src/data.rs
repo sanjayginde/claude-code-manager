@@ -201,7 +201,7 @@ fn load_sessions(dir: &Path) -> anyhow::Result<Vec<Session>> {
         });
     }
 
-    sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    sessions.sort_by_key(|s| std::cmp::Reverse(s.last_modified));
     Ok(sessions)
 }
 
