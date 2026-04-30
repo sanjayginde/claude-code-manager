@@ -48,8 +48,17 @@ pub enum Action {
     StartEditTitle,
     EditTitleChar(char),
     EditTitleBackspace,
+    EditTitleLeft,
+    EditTitleRight,
+    EditTitleHome,
+    EditTitleEnd,
     ConfirmEditTitle,
     CancelEditTitle,
+}
+
+struct EditBuffer {
+    content: String,
+    cursor: usize,
 }
 
 pub enum Response {
@@ -68,7 +77,7 @@ pub struct App {
     selection: Selection,
     active_pane: Pane,
     delete_pending: bool,
-    editing_title: Option<String>,
+    editing_title: Option<EditBuffer>,
     status: String,
     store: DynStore,
 }
@@ -175,23 +184,52 @@ impl App {
             }
             Action::StartEditTitle => {
                 if self.active_pane == Pane::Sessions && self.current_session().is_some() {
-                    let prefill = match self.current_session().map(|s| &s.title) {
+                    let content = match self.current_session().map(|s| &s.title) {
                         Some(SessionTitle::Loaded(t)) => t.clone(),
                         _ => String::new(),
                     };
-                    self.editing_title = Some(prefill);
+                    let cursor = content.len();
+                    self.editing_title = Some(EditBuffer { content, cursor });
                 }
                 Ok(Response::Continue)
             }
             Action::EditTitleChar(c) => {
                 if let Some(buf) = &mut self.editing_title {
-                    buf.push(c);
+                    buf.content.insert(buf.cursor, c);
+                    buf.cursor += c.len_utf8();
                 }
                 Ok(Response::Continue)
             }
             Action::EditTitleBackspace => {
+                if let Some(buf) = &mut self.editing_title
+                    && buf.cursor > 0 {
+                        let prev = prev_char_boundary(&buf.content, buf.cursor);
+                        buf.content.remove(prev);
+                        buf.cursor = prev;
+                    }
+                Ok(Response::Continue)
+            }
+            Action::EditTitleLeft => {
                 if let Some(buf) = &mut self.editing_title {
-                    buf.pop();
+                    buf.cursor = prev_char_boundary(&buf.content, buf.cursor);
+                }
+                Ok(Response::Continue)
+            }
+            Action::EditTitleRight => {
+                if let Some(buf) = &mut self.editing_title {
+                    buf.cursor = next_char_boundary(&buf.content, buf.cursor);
+                }
+                Ok(Response::Continue)
+            }
+            Action::EditTitleHome => {
+                if let Some(buf) = &mut self.editing_title {
+                    buf.cursor = 0;
+                }
+                Ok(Response::Continue)
+            }
+            Action::EditTitleEnd => {
+                if let Some(buf) = &mut self.editing_title {
+                    buf.cursor = buf.content.len();
                 }
                 Ok(Response::Continue)
             }
@@ -201,7 +239,7 @@ impl App {
             }
             Action::ConfirmEditTitle => {
                 if let Some(buf) = self.editing_title.take() {
-                    let trimmed = buf.trim().to_string();
+                    let trimmed = buf.content.trim().to_string();
                     if !trimmed.is_empty() {
                         let pi = self.selection.project;
                         let si = self.selection.session;
@@ -258,7 +296,11 @@ impl App {
     }
 
     pub fn editing_title(&self) -> Option<&str> {
-        self.editing_title.as_deref()
+        self.editing_title.as_ref().map(|b| b.content.as_str())
+    }
+
+    pub fn editing_title_cursor(&self) -> usize {
+        self.editing_title.as_ref().map_or(0, |b| b.cursor)
     }
 
     pub fn current_project_label(&self) -> Option<&str> {
@@ -352,6 +394,28 @@ impl App {
 
         Ok(())
     }
+}
+
+fn prev_char_boundary(s: &str, pos: usize) -> usize {
+    if pos == 0 {
+        return 0;
+    }
+    let mut i = pos - 1;
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+fn next_char_boundary(s: &str, pos: usize) -> usize {
+    if pos >= s.len() {
+        return s.len();
+    }
+    let mut i = pos + 1;
+    while !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
 }
 
 #[cfg(test)]
@@ -686,5 +750,81 @@ mod tests {
         assert_eq!(app.modal(), Modal::ConfirmDelete);
         app.dispatch(Action::ConfirmDelete).unwrap();
         assert_eq!(app.modal(), Modal::None);
+    }
+
+    // ── cursor navigation ─────────────────────────────────────────────────────
+
+    #[test]
+    fn edit_title_left_moves_cursor_and_inserts_mid_string() {
+        let mut app = make_app(&[1]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        for c in "abc".chars() {
+            app.dispatch(Action::EditTitleChar(c)).unwrap();
+        }
+        app.dispatch(Action::EditTitleLeft).unwrap();
+        app.dispatch(Action::EditTitleChar('x')).unwrap();
+        assert_eq!(app.editing_title(), Some("abxc"));
+    }
+
+    #[test]
+    fn edit_title_left_clamps_at_zero() {
+        let mut app = make_app(&[1]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar('a')).unwrap();
+        app.dispatch(Action::EditTitleLeft).unwrap();
+        app.dispatch(Action::EditTitleLeft).unwrap(); // extra left — should clamp
+        assert_eq!(app.editing_title_cursor(), 0);
+    }
+
+    #[test]
+    fn edit_title_right_clamps_at_end() {
+        let mut app = make_app(&[1]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        app.dispatch(Action::EditTitleChar('a')).unwrap();
+        app.dispatch(Action::EditTitleRight).unwrap(); // already at end
+        assert_eq!(app.editing_title_cursor(), 1);
+    }
+
+    #[test]
+    fn edit_title_home_end_move_cursor() {
+        let mut app = make_app(&[1]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        for c in "hello".chars() {
+            app.dispatch(Action::EditTitleChar(c)).unwrap();
+        }
+        assert_eq!(app.editing_title_cursor(), 5);
+        app.dispatch(Action::EditTitleHome).unwrap();
+        assert_eq!(app.editing_title_cursor(), 0);
+        app.dispatch(Action::EditTitleEnd).unwrap();
+        assert_eq!(app.editing_title_cursor(), 5);
+    }
+
+    #[test]
+    fn edit_title_backspace_at_cursor_removes_preceding_char() {
+        let mut app = make_app(&[1]);
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        for c in "abc".chars() {
+            app.dispatch(Action::EditTitleChar(c)).unwrap();
+        }
+        app.dispatch(Action::EditTitleLeft).unwrap(); // cursor before 'c'
+        app.dispatch(Action::EditTitleBackspace).unwrap(); // removes 'b'
+        assert_eq!(app.editing_title(), Some("ac"));
+        assert_eq!(app.editing_title_cursor(), 1);
+    }
+
+    #[test]
+    fn edit_title_cursor_starts_at_end_of_prefill() {
+        let mut app = make_app(&[2]);
+        let uuid = app.projects[0].sessions[0].uuid.clone();
+        app.dispatch(Action::TitleUpdate { uuid, title: "Existing".into() }).unwrap();
+        app.dispatch(Action::SwitchPane).unwrap();
+        app.dispatch(Action::StartEditTitle).unwrap();
+        assert_eq!(app.editing_title(), Some("Existing"));
+        assert_eq!(app.editing_title_cursor(), "Existing".len());
     }
 }
