@@ -275,6 +275,7 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
 
     let selected_idx = app.sessions_list_state().selected();
     let editing_buf = app.editing_title();
+    let cursor_pos = app.editing_title_cursor();
 
     let items: Vec<ListItem> = app
         .current_sessions()
@@ -282,10 +283,13 @@ fn render_sessions(frame: &mut Frame, app: &App, area: Rect, state: &mut ratatui
         .enumerate()
         .map(|(i, s)| {
             let title_line = if let Some(buf) = editing_buf && selected_idx == Some(i) {
+                let before = &buf[..cursor_pos];
+                let after = &buf[cursor_pos..];
                 Line::from(vec![
                     Span::raw(" "),
-                    Span::styled(buf, Style::default().fg(theme.active)),
+                    Span::styled(before, Style::default().fg(theme.active)),
                     Span::styled("█", Style::default().fg(theme.active)),
+                    Span::styled(after, Style::default().fg(theme.active)),
                 ])
             } else {
                 Line::from(Span::raw(format!(" {}", session_title(s))))
@@ -359,7 +363,7 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     let status = app.status();
     let (msg, style): (&str, Style) = if app.editing_title().is_some() {
         (
-            " [Enter] Confirm title  [Esc] Cancel",
+            " [Enter] Confirm title  [Esc] Cancel  [←→] Navigate",
             Style::default().fg(theme.active),
         )
     } else if !status.is_empty() {
