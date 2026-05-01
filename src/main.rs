@@ -23,6 +23,7 @@ use std::time::Duration;
 enum Outcome {
     Quit,
     Resume { cwd: PathBuf, uuid: String },
+    NewSession { cwd: PathBuf },
 }
 
 #[tokio::main]
@@ -68,6 +69,25 @@ async fn main() -> anyhow::Result<()> {
             let status = std::process::Command::new("claude")
                 .args(["--resume", &uuid])
                 .status()?;
+            std::process::exit(status.code().unwrap_or(0));
+        }
+    }
+
+    if let Outcome::NewSession { cwd } = outcome {
+        if cwd.exists() {
+            std::env::set_current_dir(&cwd)?;
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            let err = std::process::Command::new("claude").exec();
+            return Err(anyhow::anyhow!("failed to exec claude: {}", err));
+        }
+
+        #[cfg(not(unix))]
+        {
+            let status = std::process::Command::new("claude").status()?;
             std::process::exit(status.code().unwrap_or(0));
         }
     }
@@ -168,6 +188,7 @@ where
                 | KeyCode::Char('h')
                 | KeyCode::Char('l') => Action::SwitchPane,
                 KeyCode::Enter => Action::Resume,
+                KeyCode::Char('n') => Action::NewSession,
                 KeyCode::Char('d') => Action::RequestDelete,
                 KeyCode::Char('e') => Action::StartEditTitle,
                 KeyCode::Char('y') => Action::CopyMessage,
@@ -179,6 +200,7 @@ where
             Response::Continue => {}
             Response::Quit => return Ok(Outcome::Quit),
             Response::ResumeSession { cwd, uuid } => return Ok(Outcome::Resume { cwd, uuid }),
+            Response::NewSession { cwd } => return Ok(Outcome::NewSession { cwd }),
         }
     }
 }
