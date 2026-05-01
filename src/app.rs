@@ -42,6 +42,7 @@ pub enum Action {
     ConfirmDelete,
     CancelDelete,
     Resume,
+    NewSession,
     Quit,
     CopyMessage,
     TitleUpdate { uuid: String, title: String },
@@ -64,6 +65,7 @@ struct EditBuffer {
 pub enum Response {
     Continue,
     ResumeSession { cwd: PathBuf, uuid: String },
+    NewSession { cwd: PathBuf },
     Quit,
 }
 
@@ -80,10 +82,12 @@ pub struct App {
     editing_title: Option<EditBuffer>,
     status: String,
     store: DynStore,
+    startup_cwd: Option<PathBuf>,
 }
 
 impl App {
     pub fn new(projects: Vec<Project>, store: DynStore, cwd: Option<PathBuf>) -> Self {
+        let startup_cwd = cwd.clone();
         let initial_project = cwd
             .and_then(|cwd| {
                 projects.iter().position(|p| {
@@ -102,6 +106,7 @@ impl App {
             editing_title: None,
             status: String::new(),
             store,
+            startup_cwd,
         }
     }
 
@@ -151,6 +156,10 @@ impl App {
                     self.active_pane = Pane::Sessions;
                 }
                 Ok(Response::Continue)
+            }
+            Action::NewSession => {
+                let cwd = self.startup_cwd.clone().unwrap_or_default();
+                Ok(Response::NewSession { cwd })
             }
             Action::CopyMessage => {
                 match self.current_session().and_then(|s| s.first_message.as_deref()) {
@@ -826,5 +835,22 @@ mod tests {
         app.dispatch(Action::StartEditTitle).unwrap();
         assert_eq!(app.editing_title(), Some("Existing"));
         assert_eq!(app.editing_title_cursor(), "Existing".len());
+    }
+
+    // ── new session ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn new_session_returns_startup_cwd() {
+        let cwd = PathBuf::from("/tmp/test-project");
+        let mut app = App::new(vec![], Arc::new(NullSessionStore), Some(cwd.clone()));
+        let resp = app.dispatch(Action::NewSession).unwrap();
+        assert!(matches!(resp, Response::NewSession { cwd: c } if c == cwd));
+    }
+
+    #[test]
+    fn new_session_returns_empty_path_when_no_cwd() {
+        let mut app = make_app(&[1]);
+        let resp = app.dispatch(Action::NewSession).unwrap();
+        assert!(matches!(resp, Response::NewSession { cwd: c } if c == PathBuf::default()));
     }
 }

@@ -370,7 +370,7 @@ fn render_status(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         (status, Style::default().fg(theme.status_msg))
     } else {
         (
-            " [↑↓/jk] Navigate  [Tab] Switch pane  [Enter] Resume  [e] Edit title  [y] Copy  [d] Delete  [q] Quit",
+            " [↑↓/jk] Navigate  [Tab] Switch pane  [Enter] Resume  [n] New  [e] Edit title  [y] Copy  [d] Delete  [q] Quit",
             Style::default().fg(theme.hint),
         )
     };
