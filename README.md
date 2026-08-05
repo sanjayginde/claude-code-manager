@@ -4,6 +4,8 @@ A terminal UI for browsing and resuming [Claude Code](https://claude.ai/code) se
 
 ![Rust](https://img.shields.io/badge/built_with-Rust-orange)
 
+![CCM Demo](assets/demo.gif "Claude Code Manager demo")
+
 ## Features
 
 - Browse all Claude Code projects and sessions in a split-pane TUI
