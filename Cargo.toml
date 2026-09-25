@@ -2,6 +2,13 @@
 name = "ccm"
 version = "0.1.0"
 edition = "2024"
+description = "Terminal UI for browsing, managing, and resuming Claude Code sessions"
+license = "MIT"
+repository = "https://github.com/sanjayginde/claude-code-manager"
+homepage = "https://github.com/sanjayginde/claude-code-manager"
+readme = "README.md"
+keywords = ["claude", "cli", "tui", "ratatui", "anthropic"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "ccm"
