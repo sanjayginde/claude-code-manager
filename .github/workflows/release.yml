@@ -1,0 +1,83 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      sha256: ${{ steps.meta.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check tag matches Cargo.toml version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          CARGO_VERSION=$(sed -nE 's/^version = "(.*)"/\1/p' Cargo.toml | head -1)
+          if [ "${TAG_VERSION}" != "${CARGO_VERSION}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}"
+            exit 1
+          fi
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "ccm ${GITHUB_REF_NAME#v}" \
+            --generate-notes
+
+      - name: Hash source tarball
+        id: meta
+        run: |
+          URL="https://github.com/${GITHUB_REPOSITORY}/archive/refs/tags/${GITHUB_REF_NAME}.tar.gz"
+          echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(curl -fsSL "${URL}" | shasum -a 256 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+  update-tap:
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      SHA256: ${{ needs.release.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          repository: sanjayginde/homebrew-tap
+          # Fine-grained PAT with Contents: read & write on sanjayginde/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Bump formula
+        id: bump
+        run: |
+          # Re-runs of an older tag must not roll the formula back to a stale version
+          CURRENT=$(sed -nE 's|^  url ".*/refs/tags/v(.*)\.tar\.gz"|\1|p' Formula/ccm.rb)
+          NEWEST=$(printf '%s\n%s\n' "${CURRENT}" "${VERSION}" | sort -V | tail -1)
+          if [ "${VERSION}" == "${CURRENT}" ] || [ "${NEWEST}" != "${VERSION}" ]; then
+            echo "::notice::Formula is at ${CURRENT}; skipping ${VERSION}"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          sed -i -E \
+            -e "s|^  url \"(.*)/refs/tags/v.*\.tar\.gz\"|  url \"\1/refs/tags/v${VERSION}.tar.gz\"|" \
+            -e "s/^  sha256 \".*\"/  sha256 \"${SHA256}\"/" \
+            Formula/ccm.rb
+          git diff
+
+      - name: Push
+        if: steps.bump.outputs.skip != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "ccm ${VERSION}"
+          git push
