@@ -20,7 +20,17 @@ A terminal UI for browsing and resuming [Claude Code](https://claude.ai/code) se
 
 ## Installation
 
-Requires [Rust](https://rustup.rs) and the `claude` CLI.
+Requires the `claude` CLI.
+
+### Homebrew
+
+```bash
+brew install sanjayginde/tap/ccm
+```
+
+### From source
+
+Requires [Rust](https://rustup.rs).
 
 ```bash
 git clone https://github.com/sanjayginde/claude-code-manager
