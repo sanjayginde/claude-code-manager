@@ -25,7 +25,7 @@ Requires the `claude` CLI.
 ### Homebrew
 
 ```bash
-brew install sanjayginde/tap/ccm
+brew install sanjayginde/tap/claude-code-manager
 ```
 
 ### From source
