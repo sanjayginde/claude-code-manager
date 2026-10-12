@@ -3,10 +3,12 @@ name: Release
 on:
   push:
     branches: [main]
-    # Only app code triggers a release — not docs, CI config, or lockfile-only bumps
+    # Only changes to the shipped binary trigger a release — not docs or CI config.
+    # Cargo.lock counts: the formula builds with --locked, so dependency bumps ship.
     paths:
       - "src/**"
       - "Cargo.toml"
+      - "Cargo.lock"
   workflow_dispatch:
 
 permissions:
