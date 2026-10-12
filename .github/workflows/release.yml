@@ -40,7 +40,7 @@ jobs:
         run: |
           gh release create "v${VERSION}" \
             --target "${GITHUB_SHA}" \
-            --title "ccm ${VERSION}" \
+            --title "claude-code-manager ${VERSION}" \
             --generate-notes
 
       - name: Hash source tarball
